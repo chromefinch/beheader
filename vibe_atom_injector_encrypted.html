@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CPM-10: Encrypted Injection</title>
+    <style>
+        :root { --bg: #0a0a0a; --panel: #161616; --text: #d0d0d0; --accent: #ff3d00; --dim: #444; }
+        body { background: var(--bg); color: var(--text); font-family: 'Consolas', monospace; padding: 20px; height: 95vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        h1 { font-size: 16px; border-bottom: 2px solid var(--dim); padding-bottom: 10px; margin-top: 0; display: flex; justify-content: space-between; }
+        
+        /* Zones */
+        .zone-container { display: flex; gap: 20px; height: 140px; margin-bottom: 20px; }
+        .drop-zone { 
+            flex: 1; border: 1px dashed var(--dim); background: var(--panel); display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; position: relative;
+        }
+        .drop-zone:hover { border-color: var(--text); background: #222; }
+        .drop-zone.active { border-color: var(--accent); color: var(--accent); }
+        .label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; margin-bottom:5px; }
+        .filename { color: var(--accent); font-size: 11px; word-break: break-all; max-width: 90%; text-align: center; }
+
+        /* Password Input */
+        .secure-input {
+            background: #000; border: 1px solid var(--dim); color: var(--accent); 
+            padding: 10px; width: 100%; box-sizing: border-box; margin-bottom: 10px;
+            font-family: monospace; text-align: center; letter-spacing: 3px;
+        }
+        .secure-input:focus { outline: none; border-color: var(--accent); }
+
+        /* Log */
+        #info-panel { flex-grow: 1; background: #000; border: 1px solid var(--dim); padding: 10px; font-size: 11px; color: #888; overflow-y: auto; white-space: pre-wrap; margin-bottom: 10px; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #111; padding-bottom: 2px; }
+        .success { color: #0f0; } .err { color: #f00; }
+        
+        /* Footer */
+        .footer { display: flex; gap: 10px; justify-content: flex-end; }
+        button { background: #111; color: var(--text); border: 1px solid var(--dim); padding: 10px 20px; cursor: pointer; font-family: inherit; text-transform: uppercase; font-size: 11px; }
+        button:hover { background: var(--dim); }
+        button:disabled { opacity: 0.3; cursor: not-allowed; }
+        
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+
+    <h1>
+        <span>PROTOCOL: V10_CRYPTO</span>
+        <span id="system-status" style="color:var(--dim)">SECURE_MODE</span>
+    </h1>
+
+    <div class="zone-container">
+        <div id="zone-carrier" class="drop-zone" onclick="document.getElementById('fileInputCarrier').click()">
+            <div class="label">1. CARRIER MP4</div>
+            <div class="filename" id="carrier-name"></div>
+            <input type="file" id="fileInputCarrier" accept=".mp4,.m4v">
+        </div>
+
+        <div id="zone-payload" class="drop-zone" onclick="document.getElementById('fileInputPayload').click()">
+            <div class="label">2. PAYLOAD FILE</div>
+            <div class="filename" id="payload-name"></div>
+            <input type="file" id="fileInputPayload">
+        </div>
+    </div>
+
+    <input type="password" id="passphrase" class="secure-input" placeholder="ENTER DECRYPTION KEY" autocomplete="off">
+
+    <div id="info-panel"><div class="log-entry">> INITIALIZING CRYPTO ENGINE...</div></div>
+
+    <div class="footer">
+        <button id="extractBtn" onclick="extractPayload()" disabled>DECRYPT & EXTRACT</button>
+        <button id="injectBtn" onclick="injectPayload()" disabled>ENCRYPT & INJECT</button>
+    </div>
+
+    <script>
+        const MY_UUID_BYTES = new Uint8Array([
+            0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 
+            0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00
+        ]);
+
+        let carrier = {
+            buffer: null,
+            name: "",
+            insertOffset: 0, 
+            existingPayload: null
+        };
+
+        let payload = { buffer: null, name: "" };
+        const log = document.getElementById('info-panel');
+        
+        // --- 1. CARRIER ANALYSIS ---
+        
+        async function handleCarrier(file) {
+            logMsg(`> Analyzing: ${file.name} (${formatBytes(file.size)})`);
+            carrier.name = file.name;
+            document.getElementById('carrier-name').innerText = file.name;
+            document.getElementById('zone-carrier').classList.add('active');
+
+            const buffer = await file.arrayBuffer();
+            carrier.buffer = buffer;
+            
+            const atoms = scanAtoms(buffer);
+            
+            // Check for existing payload
+            const existing = atoms.find(a => a.isMyUuid);
+            if (existing) {
+                logMsg(`> <span class="success">ENCRYPTED ATOM DETECTED</span> at offset ${existing.offset}`);
+                // Extract JUST the payload part (skip 8 byte header + 16 byte UUID)
+                carrier.existingPayload = new Uint8Array(buffer.slice(existing.offset + 24, existing.offset + existing.size));
+                document.getElementById('extractBtn').disabled = false;
+            } else {
+                document.getElementById('extractBtn').disabled = true;
+            }
+
+            if (atoms.length < 1) { logMsg("> Err: Invalid MP4."); return; }
+            const lastAtom = atoms[atoms.length - 1];
+            carrier.insertOffset = lastAtom.offset;
+            
+            logMsg(`> Injection Point: Offset ${carrier.insertOffset} (End of File)`);
+            if (payload.buffer) document.getElementById('injectBtn').disabled = false;
+        }
+
+        // --- 2. ENCRYPTION & INJECTION ---
+
+        async function injectPayload() {
+            const pass = document.getElementById('passphrase').value;
+            if (!payload.buffer || !carrier.buffer) return;
+            if (!pass) { alert("PASSWORD REQUIRED"); return; }
+
+            logMsg("> Generating Entropy...");
+            
+            // A. Prepare Cleartext Data: [NameLen(2)][NameBytes][FileBytes]
+            const nameBytes = new TextEncoder().encode(payload.name);
+            const cleartextLen = 2 + nameBytes.length + payload.buffer.byteLength;
+            const cleartext = new Uint8Array(cleartextLen);
+            const view = new DataView(cleartext.buffer);
+            
+            view.setUint16(0, nameBytes.length);
+            cleartext.set(nameBytes, 2);
+            cleartext.set(new Uint8Array(payload.buffer), 2 + nameBytes.length);
+
+            // B. Encrypt
+            // Derives key from password, generates Salt/IV, returns [Salt][IV][Ciphertext]
+            const encryptedData = await encryptData(cleartext, pass);
+            logMsg(`> Encrypted size: ${formatBytes(encryptedData.length)}`);
+
+            // C. Build Atom: [Size(4)][Type(4)][UUID(16)][EncryptedData]
+            const atomSize = 4 + 4 + 16 + encryptedData.length;
+            const atomBuffer = new Uint8Array(atomSize);
+            const atomView = new DataView(atomBuffer.buffer);
+
+            atomView.setUint32(0, atomSize);
+            atomBuffer.set([117, 117, 105, 100], 4); // uuid
+            atomBuffer.set(MY_UUID_BYTES, 8);
+            atomBuffer.set(encryptedData, 24);
+
+            // D. Stitch & Heal
+            // 1. Split Carrier
+            const preAtom = new Uint8Array(carrier.buffer.slice(0, carrier.insertOffset));
+            const postAtom = new Uint8Array(carrier.buffer.slice(carrier.insertOffset));
+
+            // 2. Heal PNG Pointer (in preAtom)
+            const preHeader = new Uint8Array(preAtom); // Copy
+            const preView = new DataView(preHeader.buffer);
+            const oldPngOffset = preHeader[18] | (preHeader[19] << 8) | (preHeader[20] << 16) | (preHeader[21] << 24);
+            
+            if (oldPngOffset >= carrier.insertOffset) {
+                const newPngOffset = oldPngOffset + atomSize;
+                logMsg(`> Updating PNG Pointer: ${oldPngOffset} -> ${newPngOffset}`);
+                preHeader[18] = newPngOffset & 0xFF;
+                preHeader[19] = (newPngOffset >> 8) & 0xFF;
+                preHeader[20] = (newPngOffset >> 16) & 0xFF;
+                preHeader[21] = (newPngOffset >> 24) & 0xFF;
+            }
+
+            // 3. Heal Video Map (stco)
+            // Scan both chunks
+            healOffsetsInBlock(preHeader, atomSize, carrier.insertOffset);
+            
+            const postHeader = new Uint8Array(postAtom); // Copy
+            healOffsetsInBlock(postHeader, atomSize, carrier.insertOffset);
+
+            // E. Download
+            const finalBlob = new Blob([preHeader, atomBuffer, postHeader], { type: "video/mp4" });
+            downloadBlob(finalBlob, carrier.name);
+            logMsg(`> <span class="success">SECURE INJECTION COMPLETE</span>`);
+        }
+
+        // --- 3. DECRYPTION & EXTRACTION ---
+
+        async function extractPayload() {
+            const pass = document.getElementById('passphrase').value;
+            if (!carrier.existingPayload) return;
+            if (!pass) { alert("PASSWORD REQUIRED"); return; }
+
+            logMsg("> Attempting Decryption...");
+            
+            try {
+                // Decrypt: returns [NameLen][Name][File]
+                const cleartext = await decryptData(carrier.existingPayload, pass);
+                
+                // Parse Cleartext
+                const view = new DataView(cleartext.buffer);
+                const nameLen = view.getUint16(0);
+                const name = new TextDecoder().decode(cleartext.slice(2, 2 + nameLen));
+                const fileData = cleartext.slice(2 + nameLen);
+                
+                logMsg(`> <span class="success">SUCCESS!</span> File: ${name}`);
+                downloadBlob(new Blob([fileData]), name);
+
+            } catch (e) {
+                console.error(e);
+                logMsg(`> <span class="err">DECRYPTION FAILED. WRONG KEY?</span>`);
+            }
+        }
+
+        // --- CRYPTO PRIMITIVES (AES-GCM) ---
+
+        async function encryptData(data, password) {
+            const salt = window.crypto.getRandomValues(new Uint8Array(16));
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const key = await deriveKey(password, salt);
+
+            const ciphertext = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                data
+            );
+
+            // Result: [Salt(16)][IV(12)][Ciphertext]
+            const result = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+            result.set(salt, 0);
+            result.set(iv, 16);
+            result.set(new Uint8Array(ciphertext), 28);
+            return result;
+        }
+
+        async function decryptData(encryptedBundle, password) {
+            // Bundle: [Salt(16)][IV(12)][Ciphertext]
+            const salt = encryptedBundle.slice(0, 16);
+            const iv = encryptedBundle.slice(16, 28);
+            const ciphertext = encryptedBundle.slice(28);
+            
+            const key = await deriveKey(password, salt);
+
+            return new Uint8Array(await window.crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                ciphertext
+            ));
+        }
+
+        async function deriveKey(password, salt) {
+            const enc = new TextEncoder();
+            const keyMaterial = await window.crypto.subtle.importKey(
+                "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]
+            );
+            return window.crypto.subtle.deriveKey(
+                { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+                keyMaterial,
+                { name: "AES-GCM", length: 256 },
+                false, ["encrypt", "decrypt"]
+            );
+        }
+
+        // --- UTILS ---
+        function scanAtoms(buffer) {
+            const view = new DataView(buffer);
+            const uint8 = new Uint8Array(buffer);
+            let offset = 0;
+            const atoms = [];
+            while (offset < view.byteLength) {
+                if (offset + 8 > view.byteLength) break;
+                const size = view.getUint32(offset);
+                if (size === 0) break; 
+                const type = String.fromCharCode(view.getUint8(offset+4), view.getUint8(offset+5), view.getUint8(offset+6), view.getUint8(offset+7));
+                let isMyUuid = false;
+                if (type === 'uuid') {
+                    const check = uint8.slice(offset+8, offset+24);
+                    if (arraysEqual(check, MY_UUID_BYTES)) isMyUuid = true;
+                }
+                atoms.push({ offset, size, type, isMyUuid });
+                offset += size;
+            }
+            return atoms;
+        }
+
+        function healOffsetsInBlock(block, shiftAmount, boundaryThreshold) {
+            const view = new DataView(block.buffer, block.byteOffset, block.byteLength);
+            let offset = 0;
+            while (offset < block.length - 8) {
+                const size = view.getUint32(offset);
+                if (size === 0) break;
+                const type = String.fromCharCode(view.getUint8(offset+4), view.getUint8(offset+5), view.getUint8(offset+6), view.getUint8(offset+7));
+                if (type === 'stco') {
+                    const count = view.getUint32(offset + 12);
+                    let tblPos = offset + 16;
+                    for (let i = 0; i < count; i++) {
+                        const val = view.getUint32(tblPos);
+                        if (val >= boundaryThreshold) view.setUint32(tblPos, val + shiftAmount);
+                        tblPos += 4;
+                    }
+                } else if (['moov','trak','mdia','minf','stbl'].includes(type)) {
+                    offset += 8; continue; 
+                }
+                offset += size;
+            }
+        }
+
+        function downloadBlob(blob, name) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+        }
+
+        function logMsg(html) {
+            const d = document.createElement('div');
+            d.className = 'log-entry';
+            d.innerHTML = html;
+            log.appendChild(d);
+            log.scrollTop = log.scrollHeight;
+        }
+        function arraysEqual(a, b) {
+            if (a.length !== b.length) return false;
+            for (let i=0; i<a.length; i++) if (a[i]!==b[i]) return false;
+            return true;
+        }
+        function formatBytes(bytes) {
+            if (bytes===0) return '0 B';
+            const k=1024, sizes=['B','KB','MB','GB'], i=Math.floor(Math.log(bytes)/Math.log(k));
+            return parseFloat((bytes/Math.pow(k,i)).toFixed(2))+' '+sizes[i];
+        }
+        async function handlePayload(file) {
+            logMsg(`> Staging: ${file.name}`);
+            payload.name = file.name;
+            payload.buffer = await file.arrayBuffer();
+            document.getElementById('payload-name').innerText = file.name;
+            document.getElementById('zone-payload').classList.add('active');
+            if (carrier.buffer) document.getElementById('injectBtn').disabled = false;
+        }
+
+        document.getElementById('zone-carrier').addEventListener('drop', ev => { ev.preventDefault(); handleCarrier(ev.dataTransfer.files[0]); });
+        document.getElementById('zone-carrier').addEventListener('dragover', ev => ev.preventDefault());
+        document.getElementById('zone-payload').addEventListener('drop', ev => { ev.preventDefault(); handlePayload(ev.dataTransfer.files[0]); });
+        document.getElementById('zone-payload').addEventListener('dragover', ev => ev.preventDefault());
+        document.getElementById('fileInputCarrier').addEventListener('change', e => handleCarrier(e.target.files[0]));
+        document.getElementById('fileInputPayload').addEventListener('change', e => handlePayload(e.target.files[0]));
+
+    </script>
+</body>
+</html>
