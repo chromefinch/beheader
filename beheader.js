@@ -9,23 +9,24 @@ Usage: beheader <output> <image> <video|audio> [-options] [appendable...]
 Polyglot generator for media files.
 
 Arguments:
-    output               Path of resulting polyglot file
-    image                Path of input image file
-    video|audio          Path of input video (or audio) file
-    appendable           Path(s) of files to append without parsing
+    output                Path of resulting polyglot file
+    image                 Path of input image file
+    video|audio           Path of input video (or audio) file
+    appendable            Path(s) of files to append without parsing
 
 Options:
-    -h, --html <path>    Path to HTML document
-    -p, --pdf <path>     Path to PDF document
-    -z, --zip <path>     Path to ZIP-like archive (repeatable)
-    -e, --extra <path>   Path to short (<200b) file to include near the header
-    --help               Print this help message and exit
+    -h, --html <path>     Path to HTML document
+    -p, --pdf <path>      Path to PDF document
+    -z, --zip <path>      Path to ZIP-like archive (repeatable)
+    -e, --extra <path>    Path to short (<200b) file to include near the header
+    --help                Print this help message and exit
 
 Notes:
     * Video (and audio) gets re-encoded to MP4, images get converted to PNG in an ICO container.
     * Repeated ZIP files (e.g. \`-z foo.zip -z bar.zip\`) will be re-packed into one file. In case of conflict, files in later archives overwrite previous files.
     * ZIP-like archives are inserted last, after any appendables.
     * The \`--extra\` data gets inserted at address 22. Input size is not regulated - exceeding ~200 bytes or less may break other components.
+    * Dependencies: ffmpeg, imagemagick, zip, unzip, bun (https://bun.com/), bento4 (https://www.bento4.com/downloads/)
 `);
 
   process.exit(1);
@@ -74,6 +75,12 @@ if (!output) printHelpAndExit();
 
 // Treat remaining arguments as appendable binaries
 const appendables = argv.slice(5);
+
+// Determine path to mp4edit utility
+let mp4editPath = "mp4edit";
+if (await Bun.file("./mp4edit").exists()) {
+  mp4editPath = "./mp4edit";
+}
 
 // Converts a number to a 4-byte little-endian uint8 buffer
 function numberTo4bLE (num) {
@@ -177,7 +184,7 @@ try {
 
   // The ftyp atom is not yet finished, we replace it only to measure offsets
   await Bun.write(atomFile, ftypBuffer);
-  await $`./mp4edit --replace ftyp:"${tmp + ".atom"}" "${tmp + "0.mp4"}" "${tmp + "1.mp4"}"`;
+  await $`${mp4editPath} --replace ftyp:"${tmp + ".atom"}" "${tmp + "0.mp4"}" "${tmp + "1.mp4"}"`;
 
   // Wrap the input HTML document (if any) to avoid rendering surrounding garbage
   const htmlString = html ? `--><style>body{font-size:0}</style><div style=font-size:initial>${await htmlFile.text()}</div><!--` : "";
@@ -198,7 +205,7 @@ try {
 
   // Insert the skip atom into the output file to get its final offset
   await Bun.write(atomFile, skipBuffer);
-  await $`./mp4edit --insert skip:"${tmp + ".atom"}" "${tmp + "1.mp4"}" "${tmp + "2.mp4"}"`;
+  await $`${mp4editPath} --insert skip:"${tmp + ".atom"}" "${tmp + "1.mp4"}" "${tmp + "2.mp4"}"`;
 
   // Find offset of PNG data in MP4 file
   const offsetReference = await Bun.file(tmp + "2.mp4").bytes();
@@ -258,7 +265,7 @@ try {
 
   // Now the ftyp atom is ready, replace it and write the output file
   await Bun.write(atomFile, ftypBuffer);
-  await $`./mp4edit --replace ftyp:"${tmp + ".atom"}" "${tmp + "2.mp4"}" "${output}"`;
+  await $`${mp4editPath} --replace ftyp:"${tmp + ".atom"}" "${tmp + "2.mp4"}" "${output}"`;
 
   // Fix earlier bithack, splitting off the extra ftyp atom
   const outputfd = await fs.open(output, "r+");
@@ -356,4 +363,3 @@ try {
   } catch { /* Cleanup can fail silently */ }
 
 }
-
