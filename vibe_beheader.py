@@ -46,6 +46,46 @@ def number_to_4b_be(num):
 def pad_left(s, target_len, pad_char="0"):
     return str(s).rjust(target_len, pad_char)
 
+def patch_zip_offsets(zip_bytes, offset_shift):
+    """
+    Parses a ZIP file binary, splits the EOCD, and shifts all internal offsets.
+    Returns (patched_body_bytes, patched_eocd_bytes).
+    """
+    # Find EOCD (End of Central Directory) signature: 0x06054b50
+    # Scan backwards from the end
+    eocd_idx = -1
+    for i in range(len(zip_bytes) - 22, max(len(zip_bytes) - 65557, -1), -1):
+        if zip_bytes[i:i+4] == b'\x50\x4b\x05\x06':
+            eocd_idx = i
+            break
+    
+    if eocd_idx == -1:
+        raise Exception("Could not find EOCD in ZIP file")
+
+    body = bytearray(zip_bytes[:eocd_idx])
+    eocd = bytearray(zip_bytes[eocd_idx:])
+
+    # 1. Patch offsets in Central Directory Headers (Signature: 0x02014b50)
+    # The 'Relative offset of local header' is at bytes 42-46
+    idx = 0
+    while True:
+        idx = body.find(b'\x50\x4b\x01\x02', idx)
+        if idx == -1:
+            break
+        
+        current_offset = struct.unpack('<I', body[idx+42:idx+46])[0]
+        new_offset = current_offset + offset_shift
+        body[idx+42:idx+46] = struct.pack('<I', new_offset)
+        idx += 4
+    
+    # 2. Patch offset in EOCD
+    # The 'Offset of start of central directory' is at bytes 16-20
+    current_cd_offset = struct.unpack('<I', eocd[16:20])[0]
+    new_cd_offset = current_cd_offset + offset_shift
+    eocd[16:20] = struct.pack('<I', new_cd_offset)
+
+    return body, eocd
+
 def main():
     # Parse command line by cloning argv
     argv = list(sys.argv)
@@ -179,6 +219,37 @@ def main():
         
         subprocess.check_call(f'{mp4edit_path} --replace ftyp:"{tmp_atom}" "{tmp_mp4_0}" "{tmp_mp4_1}"', shell=True)
 
+        # Handle ZIP creation early so we have the data
+        zip_body = b""
+        zip_eocd = b""
+        
+        if zip_files:
+            os.makedirs(tmp_zip_dir, exist_ok=True)
+            for curr in zip_files:
+                subprocess.check_call(f'unzip -o -d "{tmp_zip_dir}" "{curr}"', shell=True, stdout=subprocess.DEVNULL)
+            
+            cwd = os.getcwd()
+            os.chdir(tmp_zip_dir)
+            subprocess.check_call(f'zip -r9 "../{tmp_zip}" .', shell=True, stdout=subprocess.DEVNULL)
+            os.chdir(cwd)
+            
+            with open(tmp_zip, 'rb') as f:
+                raw_zip_data = f.read()
+            
+            # Temporarily separate body and EOCD, we don't know the offset yet
+            # We will patch them later
+            eocd_idx = -1
+            for i in range(len(raw_zip_data) - 22, max(len(raw_zip_data) - 65557, -1), -1):
+                if raw_zip_data[i:i+4] == b'\x50\x4b\x05\x06':
+                    eocd_idx = i
+                    break
+            
+            if eocd_idx != -1:
+                zip_body = raw_zip_data[:eocd_idx]
+                zip_eocd = raw_zip_data[eocd_idx:]
+            else:
+                print("Warning: Generated ZIP has no EOCD. Ignoring ZIP.")
+
         # Wrap HTML
         html_string = b""
         if html_path:
@@ -192,13 +263,20 @@ def main():
             png_bytes = f.read()
 
         # Create skip atom
-        skip_payload_len = len(png_bytes) + len(html_string)
+        # Now includes HTML + PNG + ZIP Body (unpatched)
+        skip_payload_len = len(png_bytes) + len(html_string) + len(zip_body)
         skip_buffer_data = bytearray(skip_payload_len)
         
+        cursor = 0
         if html_string:
-            skip_buffer_data[0:len(html_string)] = html_string
+            skip_buffer_data[cursor:cursor+len(html_string)] = html_string
+            cursor += len(html_string)
         
-        skip_buffer_data[len(html_string):] = png_bytes
+        skip_buffer_data[cursor:cursor+len(png_bytes)] = png_bytes
+        cursor += len(png_bytes)
+        
+        if zip_body:
+            skip_buffer_data[cursor:] = zip_body
         
         skip_buffer_len = len(skip_buffer_data) + 8
         skip_buffer = bytearray(skip_buffer_len)
@@ -211,7 +289,7 @@ def main():
         
         subprocess.check_call(f'{mp4edit_path} --insert skip:"{tmp_atom}" "{tmp_mp4_1}" "{tmp_mp4_2}"', shell=True)
 
-        # Find offset
+        # Find offsets
         with open(tmp_mp4_2, 'rb') as f:
             mp4_ref_bytes = f.read()
         
@@ -221,7 +299,30 @@ def main():
         if found_idx == -1:
              raise Exception("Could not find injected atom offset")
         
-        png_offset = found_idx + 8 + len(html_string)
+        # Calculate offsets
+        payload_start = found_idx + 8
+        png_offset = payload_start + len(html_string)
+        zip_offset = png_offset + len(png_bytes)
+
+        # Now that we know where the zip landed, we can patch the offsets
+        # inside the MP4 file (overwriting the unpatched zip body)
+        if zip_body and zip_eocd:
+            # We reconstruct the full zip logic to perform patching, 
+            # but we only write the body back to the middle of the file.
+            # We keep the EOCD for the end.
+            
+            # Combine back to patch easily (or just patch the pieces we have)
+            # Let's use the helper. We construct a fake full zip to use the helper.
+            full_raw_zip = zip_body + zip_eocd
+            patched_body, patched_eocd = patch_zip_offsets(full_raw_zip, zip_offset)
+            
+            # Overwrite the zip body in the file
+            with open(tmp_mp4_2, 'r+b') as f:
+                f.seek(zip_offset)
+                f.write(patched_body)
+            
+            # Update our EOCD reference for appending later
+            zip_eocd = patched_eocd
 
         # Set PNG data offset
         ftyp_buffer[18:22] = number_to_4b_le(png_offset)
@@ -261,7 +362,6 @@ def main():
                     break
             
             obj_bytes = obj_string.encode('utf-8')
-            # Note: Mimicking JS `atomFreeAddr + extra.length` insertion point logic
             insert_idx = atom_free_addr + len(extra_data)
             ftyp_buffer[insert_idx : insert_idx + len(obj_bytes)] = obj_bytes
             atom_free_addr += len(obj_bytes)
@@ -346,25 +446,10 @@ def main():
                     with open(output_path, 'ab') as f_out:
                         shutil.copyfileobj(f_in, f_out)
         
-        # Handle ZIPs
-        if zip_files:
-            os.makedirs(tmp_zip_dir, exist_ok=True)
-            
-            # Extract
-            for curr in zip_files:
-                subprocess.check_call(f'unzip -o -d "{tmp_zip_dir}" "{curr}"', shell=True, stdout=subprocess.DEVNULL)
-            
-            # Repack
-            cwd = os.getcwd()
-            os.chdir(tmp_zip_dir)
-            subprocess.check_call(f'zip -r9 "../{tmp_zip}" .', shell=True, stdout=subprocess.DEVNULL)
-            os.chdir(cwd)
-            
-            with open(tmp_zip, 'rb') as f_in:
-                with open(output_path, 'ab') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            
-            subprocess.check_call(f'zip -A "{output_path}"', shell=True, stdout=subprocess.DEVNULL)
+        # Append ZIP EOCD pointer last (if exists)
+        if zip_eocd:
+            with open(output_path, 'ab') as f:
+                f.write(zip_eocd)
 
     except Exception as e:
         print(e, file=sys.stderr)
