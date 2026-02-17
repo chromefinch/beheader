@@ -2,7 +2,7 @@
 Polyglot generator for media files.
 
 ### Dependencies
-This project requires the [Bun JavaScript runtime](https://bun.sh/), and is built for Linux systems. You'll need `ffmpeg`, `ffprobe`, ImageMagick's `convert`, `zip`, and `unzip` in your `PATH`, as well as an executable [mp4edit](https://www.bento4.com/) binary in your working directory.
+This project requires the [Bun JavaScript runtime](https://bun.sh/), and is built for Linux systems. You'll need `ffmpeg`, `ffprobe`, ImageMagick's `convert`, `zip`, and `unzip` in your `PATH`, as well as an executable [mp4edit](https://www.bento4.com/) binary in your working directory. `sudo mv Bento4-SDK-1-6-0-641.x86_64-unknown-linux/bin/* /usr/local/bin/`
 
 If you have Nix installed on your system, be it just `nix` on your favorite distribution, or you're running NixOS, you can (after cloning) use the `flake.nix` to automatically get all of the above dependencies.
 
