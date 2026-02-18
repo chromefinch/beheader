@@ -11,7 +11,10 @@ With all dependencies set up, you should be able to run:
 ```
 $ bun run beheader.js <output> <image> <video|audio> [-options] [appendable...]
 ```
-
+Subtitle Injector 
+```
+$ subtitle_injector.py <output> <video> -H subtitle_injector.html -S 2
+```
 **Positional arguments:**
 - `output` - Path of resulting polyglot file.
 - `image` - Path of input image file.
