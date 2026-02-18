@@ -15,6 +15,11 @@ Subtitle Injector
 ```
 $ subtitle_injector.py <output> <video> -H subtitle_injector.html -S 2
 ```
+![Upload](images/upload.jpg)
+![midDownload](images/midDownload.jpg)
+![Download](images/perfectDownload.jpg)
+
+
 **Positional arguments:**
 - `output` - Path of resulting polyglot file.
 - `image` - Path of input image file.
