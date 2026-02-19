@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CPM-10: Scatter-Gather Injector V22 (Binary Polyglot)</title>
+    <title>CPM-10: Scatter-Gather Injector V24 (Strict Text Validator)</title>
     <style>
         :root { --bg: #0a0a0a; --panel: #161616; --text: #d0d0d0; --accent: #00e5ff; --dim: #444; --err: #ff3333; --success: #33ff00; --warn: #ffaa00; }
         body { background: var(--bg); color: var(--text); font-family: 'Consolas', monospace; padding: 20px; height: 95vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -20,6 +20,10 @@
         .label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; margin-bottom:5px; }
         .filename { color: var(--accent); font-size: 11px; word-break: break-all; max-width: 90%; text-align: center; }
         .meta { font-size: 10px; color: #666; margin-top: 5px; }
+
+        /* Controls */
+        .controls { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; justify-content: flex-end;}
+        select { background: #000; color: var(--accent); border: 1px solid var(--dim); padding: 5px; font-family: inherit; font-size: 11px; }
 
         /* Log */
         #info-panel { flex-grow: 1; background: #000; border: 1px solid var(--dim); padding: 10px; font-size: 11px; color: #888; overflow-y: auto; white-space: pre-wrap; margin-bottom: 10px; }
@@ -42,7 +46,7 @@
 <body>
 
     <h1>
-        <span>PROTOCOL: V22</span>
+        <span>PROTOCOL: V24_STRICT_TEXT</span>
         <span id="system-status" style="color:var(--dim)">IDLE</span>
     </h1>
 
@@ -62,7 +66,13 @@
         </div>
     </div>
 
-    <!-- Password Input Removed for Debugging -->
+    <div class="controls">
+        <label for="injectMode" style="font-size: 11px; color: #888;">INJECTION ENCODING:</label>
+        <select id="injectMode" onchange="updateCapacityDisplay()">
+            <option value="BINARY">BINARY (V22) - Efficient</option>
+            <option value="TEXT">TEXT/BASE64 (V23) - FFmpeg/SRT Safe</option>
+        </select>
+    </div>
 
     <div id="info-panel"><div class="log-entry">> WAITING FOR INPUT...</div></div>
 
@@ -81,30 +91,32 @@
         const POLYGLOT_SUFFIX = new TextEncoder().encode("<!--");
         const MAGIC_FOOTER = new TextEncoder().encode("$$CPM10_EOF$$");
         
-        // V22: 4-Byte Anchor (High Entrophy) to remove Terminator dependency
-        // 0xCAFEBABE is classic, detectable but robust against collisions
-        const FRAME_ANCHOR = [0xCA, 0xFE, 0xBA, 0xBE];
+        // V22: Binary Anchors
+        const ANCHOR_BIN = [0xCA, 0xFE, 0xBA, 0xBE];
+        
+        // V23: Text Anchors ({{{{ and }}}} in ASCII)
+        const ANCHOR_TXT_START = [0x7B, 0x7B, 0x7B, 0x7B]; 
+        const ANCHOR_TXT_END = [0x7D, 0x7D, 0x7D, 0x7D];
+
         const UNDERSCORE = 0x5F;
         
         // --- STATE MANAGEMENT ---
-        let carrier = { buffer: null, name: "", startOffset: -1, totalCapacity: 0, segments: [] };
+        let carrier = { buffer: null, name: "", startOffset: -1, segments: [] };
         let payload = { buffer: null, name: "" };
         
-        // Spanning State (Injection)
         let injectionState = {
             active: false,
-            payloadBlob: null,
+            payloadData: null, // Uint8Array
             offset: 0,
             sessionID: 0,
-            partIndex: 1
+            partIndex: 1,
+            mode: "BINARY"
         };
 
-        // Assembly State (Extraction)
         let assemblyState = {
-            parts: {}, // index -> Uint8Array
+            parts: {}, 
             totalParts: 0,
-            sessionID: null,
-            expectedName: ""
+            sessionID: null
         };
 
         const log = document.getElementById('info-panel');
@@ -117,43 +129,35 @@
             document.getElementById('carrier-name').innerText = file.name;
             document.getElementById('zone-carrier').classList.add('active');
 
-            const buffer = await file.arrayBuffer();
-            carrier.buffer = buffer;
-            const uint8 = new Uint8Array(buffer);
-            
-            // Markers
-            const freshOffset = findSequence(uint8, new TextEncoder().encode(MARKER_FRESH));
-            const injectedOffset = findSequence(uint8, POLYGLOT_PREFIX);
-            
-            let mode = "UNKNOWN";
-            let searchStart = 0;
+            try {
+                const buffer = await file.arrayBuffer();
+                carrier.buffer = buffer;
+                const uint8 = new Uint8Array(buffer);
+                
+                // Markers
+                const freshOffset = findSequence(uint8, new TextEncoder().encode(MARKER_FRESH));
+                const injectedOffset = findSequence(uint8, POLYGLOT_PREFIX);
+                
+                let searchStart = 0;
+                if (injectedOffset !== -1) {
+                    logMsg(`> Detected Existing Injection.`);
+                    searchStart = injectedOffset + POLYGLOT_PREFIX.length;
+                    document.getElementById('extractBtn').disabled = false;
+                } else if (freshOffset !== -1) {
+                    searchStart = freshOffset + MARKER_FRESH.length;
+                    document.getElementById('extractBtn').disabled = true;
+                } else {
+                    document.getElementById('extractBtn').disabled = false;
+                }
 
-            // Detection Logic
-            if (injectedOffset !== -1) {
-                mode = "INJECTED (V15+)";
-                searchStart = injectedOffset + POLYGLOT_PREFIX.length;
-                document.getElementById('extractBtn').disabled = false;
-                document.getElementById('extractBtn').innerText = "SCAN & ASSEMBLE";
-            } else if (freshOffset !== -1) {
-                searchStart = freshOffset + MARKER_FRESH.length;
-                mode = "FRESH (CLEAN)";
-                document.getElementById('extractBtn').disabled = true;
-            } else {
-                mode = "SCATTERED / UNKNOWN";
-                document.getElementById('extractBtn').disabled = false;
-                document.getElementById('extractBtn').innerText = "SCAN & ASSEMBLE";
+                carrier.startOffset = searchStart;
+                carrier.segments = mapWritableSegments(uint8, searchStart);
+                
+                updateCapacityDisplay();
+                updateInjectButtonState();
+            } catch (e) {
+                logMsg(`> Error reading carrier: ${e.message}`);
             }
-
-            carrier.startOffset = searchStart;
-            
-            // Map Segments & Calculate Capacity (V22: Overhead = 5 bytes: 4 Anchor + 1 Len)
-            carrier.segments = mapWritableSegments(uint8, searchStart);
-            carrier.totalCapacity = carrier.segments.reduce((acc, seg) => (seg.len > 5) ? acc + (seg.len - 5) : acc, 0);
-
-            logMsg(`> Mode: ${mode} | Writable Cap: <span class="info">${formatBytes(carrier.totalCapacity)}</span>`);
-            document.getElementById('carrier-meta').innerText = `CAP: ${formatBytes(carrier.totalCapacity)}`;
-
-            updateInjectButtonState();
         }
 
         function mapWritableSegments(uint8, startIdx) {
@@ -166,66 +170,121 @@
                     currentLen++;
                 } else {
                     if (currentStart !== -1) {
-                        // V22: Filter tiny segments (Must hold 4 anchor + 1 len + 1 data)
-                        if(currentLen > 5) segments.push({ start: currentStart, len: currentLen });
+                        if(currentLen > 3) segments.push({ start: currentStart, len: currentLen });
                         currentStart = -1;
                         currentLen = 0;
                     }
                 }
             }
-            if (currentStart !== -1 && currentLen > 5) segments.push({ start: currentStart, len: currentLen });
+            if (currentStart !== -1 && currentLen > 3) segments.push({ start: currentStart, len: currentLen });
             return segments;
         }
 
-        // --- 2. INJECTION (V22 4-BYTE ANCHOR) ---
+        function updateCapacityDisplay() {
+            if(!carrier.segments.length) return;
+            const mode = document.getElementById('injectMode').value;
+            
+            let cap = 0;
+            if (mode === "BINARY") {
+                cap = carrier.segments.reduce((acc, s) => (s.len > 5) ? acc + (s.len - 5) : acc, 0);
+            } else {
+                // Text Mode: Payload is Base64 (1.33x) + 8 byte overhead
+                let rawCap = carrier.segments.reduce((acc, s) => (s.len > 8) ? acc + (s.len - 8) : acc, 0);
+                cap = Math.floor(rawCap / 1.34); 
+            }
+            
+            document.getElementById('carrier-meta').innerText = `CAP (${mode}): ~${formatBytes(cap)}`;
+            logMsg(`> Capacity [${mode}]: ~${formatBytes(cap)}`);
+        }
+
+        async function handlePayload(file) {
+            if (injectionState.active) {
+                if(!confirm("Cancel current spanning operation?")) return;
+                resetInjectionState();
+            }
+            logMsg(`> Staging: ${file.name} (${formatBytes(file.size)})`);
+            try {
+                payload.name = file.name;
+                payload.buffer = await file.arrayBuffer();
+                document.getElementById('payload-name').innerText = file.name;
+                document.getElementById('payload-meta').innerText = formatBytes(file.size);
+                document.getElementById('zone-payload').classList.add('active');
+                updateInjectButtonState();
+            } catch (e) {
+                logMsg(`> Error reading payload: ${e.message}`);
+            }
+        }
+
+        function updateInjectButtonState() {
+            const btn = document.getElementById('injectBtn');
+            if (injectionState.active) {
+                btn.disabled = false;
+                btn.innerText = `INJECT PART ${injectionState.partIndex}`;
+                document.getElementById('fileInputPayload').disabled = true;
+            } else {
+                const ready = payload.buffer && carrier.buffer;
+                btn.disabled = !ready;
+                btn.innerText = "INJECT";
+                document.getElementById('fileInputPayload').disabled = false;
+            }
+        }
+
+        // --- 2. INJECTION (HYBRID) ---
 
         async function injectPayload() {
-            // Step A: Initial Packaging (Only once)
+            const mode = document.getElementById('injectMode').value;
+
+            // Step A: Initial Packaging (Raw Binary)
             if (!injectionState.active) {
                 if (!payload.buffer) return;
-                logMsg("> Packaging Payload (Cleartext)...");
+                logMsg(`> Packaging Payload...`);
                 
-                // Pack Name + Data
                 const nameBytes = new TextEncoder().encode(payload.name);
                 const cleartextLen = 2 + nameBytes.length + payload.buffer.byteLength;
                 const cleartext = new Uint8Array(cleartextLen);
                 const view = new DataView(cleartext.buffer);
-                view.setUint16(0, nameBytes.length); // Big Endian
+                view.setUint16(0, nameBytes.length); 
                 cleartext.set(nameBytes, 2);
                 cleartext.set(new Uint8Array(payload.buffer), 2 + nameBytes.length);
 
-                // NO ENCRYPTION
-                injectionState.payloadBlob = cleartext;
+                injectionState.payloadData = cleartext; // Uint8Array
                 injectionState.sessionID = Math.floor(Math.random() * 0xFFFFFFFF);
                 injectionState.offset = 0;
                 injectionState.partIndex = 1;
                 injectionState.active = true;
+                injectionState.mode = mode;
                 
-                logMsg(`> Payload Size: ${formatBytes(injectionState.payloadBlob.length)}`);
+                logMsg(`> Payload Size: ${formatBytes(injectionState.payloadData.length)}`);
             }
 
-            // Step B: Calculate Space
+            // Step B: Calculate Allocation
             const HEADER_SIZE = 10;
-            const OVERHEAD = POLYGLOT_PREFIX.length + HEADER_SIZE + MAGIC_FOOTER.length + POLYGLOT_SUFFIX.length;
+            const POLY_OVERHEAD = POLYGLOT_PREFIX.length + HEADER_SIZE + MAGIC_FOOTER.length + POLYGLOT_SUFFIX.length;
             
-            const availableSpace = carrier.totalCapacity - OVERHEAD - 100; 
+            let availableSpace = 0;
+            const overheadPerSeg = (mode === "BINARY") ? 5 : 8;
             
+            if(mode === "BINARY") {
+                availableSpace = carrier.segments.reduce((acc, s) => (s.len > 5) ? acc + (s.len - 5) : acc, 0) - POLY_OVERHEAD - 100;
+            } else {
+                let rawCap = carrier.segments.reduce((acc, s) => (s.len > 8) ? acc + (s.len - 8) : acc, 0);
+                availableSpace = Math.floor(rawCap / 1.34) - POLY_OVERHEAD - 100;
+            }
+
             if (availableSpace <= 0) {
-                logMsg(`> <span class="err">ERROR:</span> Carrier too small for V22.`);
+                logMsg(`> <span class="err">ERROR:</span> Carrier too small.`);
                 return;
             }
 
-            const blobSize = injectionState.payloadBlob.length;
-            const remaining = blobSize - injectionState.offset;
-            
-            // Determine if this is the last part
-            let isLastPart = (remaining <= availableSpace);
-            
-            // Calculate Chunk
+            const totalSize = injectionState.payloadData.length;
+            const remaining = totalSize - injectionState.offset;
+            const isLastPart = (remaining <= availableSpace);
             const chunkLen = isLastPart ? remaining : availableSpace;
-            const chunkData = injectionState.payloadBlob.slice(injectionState.offset, injectionState.offset + chunkLen);
-            
-            // Create Span Header (10 bytes)
+
+            // Slice Raw Bytes
+            const chunkData = injectionState.payloadData.slice(injectionState.offset, injectionState.offset + chunkLen);
+
+            // Construct Protocol Stream (Binary)
             const spanHeader = new Uint8Array(HEADER_SIZE);
             const dv = new DataView(spanHeader.buffer);
             dv.setUint32(0, injectionState.sessionID);
@@ -233,7 +292,6 @@
             dv.setUint8(5, isLastPart ? 0x01 : 0x00);
             dv.setUint32(6, chunkLen);
 
-            // Construct Stream
             const streamTotal = POLYGLOT_PREFIX.length + spanHeader.length + chunkData.length + MAGIC_FOOTER.length + POLYGLOT_SUFFIX.length;
             const stream = new Uint8Array(streamTotal);
             let ptr = 0;
@@ -243,119 +301,186 @@
             stream.set(MAGIC_FOOTER, ptr); ptr += MAGIC_FOOTER.length;
             stream.set(POLYGLOT_SUFFIX, ptr);
 
-            // Inject into Segments (V22: 4 Byte Anchor)
-            logMsg(`> Injecting Part ${injectionState.partIndex}... (${formatBytes(chunkLen)})`);
+            // Prepare Injection Data
+            let finalInjectionData; // Either Uint8Array or String
             
-            let foundCapacity = 0;
+            if (mode === "BINARY") {
+                finalInjectionData = stream;
+            } else {
+                // Convert entire stream to Base64 String for Text Mode
+                finalInjectionData = await blobToBase64(new Blob([stream]));
+            }
+
+            logMsg(`> Injecting Part ${injectionState.partIndex} (${mode})...`);
+
+            const finalBlob = new Uint8Array(carrier.buffer);
+            let streamPtr = 0;
+            const dataLen = finalInjectionData.length;
+            
+            // Allocation Loop
             let startSegIdx = -1;
+            let foundCapacity = 0;
+            
             for (let i = carrier.segments.length - 1; i >= 0; i--) {
-                const segCap = Math.max(0, carrier.segments[i].len - 5); // -5 overhead
+                const segCap = Math.max(0, carrier.segments[i].len - overheadPerSeg);
                 foundCapacity += segCap;
-                if (foundCapacity >= streamTotal) {
+                if (foundCapacity >= dataLen) {
                     startSegIdx = i;
                     break;
                 }
             }
 
-            if (startSegIdx === -1) { 
-                logMsg(`> <span class="err">ALLOCATION FAIL:</span> Need larger carrier.`); 
-                return; 
-            }
+            if (startSegIdx === -1) { logMsg("> Alloc Fail."); return; }
 
-            const finalBlob = new Uint8Array(carrier.buffer);
-            let streamPtr = 0;
             let segIdx = startSegIdx;
             
-            while (streamPtr < stream.length && segIdx < carrier.segments.length) {
+            while (streamPtr < dataLen && segIdx < carrier.segments.length) {
                 const seg = carrier.segments[segIdx];
-                // V22: Check for 5 byte overhead
-                if (seg.len <= 5) { segIdx++; continue; }
+                if (seg.len <= overheadPerSeg) { segIdx++; continue; }
                 
-                const writeLen = Math.min(seg.len - 5, stream.length - streamPtr);
+                const writeLen = Math.min(seg.len - overheadPerSeg, dataLen - streamPtr);
                 
-                // Write 4-Byte Anchor
-                finalBlob[seg.start] = FRAME_ANCHOR[0];
-                finalBlob[seg.start + 1] = FRAME_ANCHOR[1];
-                finalBlob[seg.start + 2] = FRAME_ANCHOR[2];
-                finalBlob[seg.start + 3] = FRAME_ANCHOR[3];
-                
-                // Write Length
-                finalBlob[seg.start + 4] = writeLen;
-                
-                // Write Data
-                finalBlob.set(stream.slice(streamPtr, streamPtr + writeLen), seg.start + 5);
-                
+                if (mode === "BINARY") {
+                    // [CA FE BA BE] [LEN] [DATA]
+                    finalBlob[seg.start] = ANCHOR_BIN[0];
+                    finalBlob[seg.start+1] = ANCHOR_BIN[1];
+                    finalBlob[seg.start+2] = ANCHOR_BIN[2];
+                    finalBlob[seg.start+3] = ANCHOR_BIN[3];
+                    finalBlob[seg.start+4] = writeLen;
+                    finalBlob.set(finalInjectionData.slice(streamPtr, streamPtr+writeLen), seg.start+5);
+                } else {
+                    // [{{{{] [BASE64] [}}}}]
+                    finalBlob.set(ANCHOR_TXT_START, seg.start);
+                    
+                    const chunkStr = finalInjectionData.substring(streamPtr, streamPtr+writeLen);
+                    for(let k=0; k<chunkStr.length; k++) {
+                        finalBlob[seg.start + 4 + k] = chunkStr.charCodeAt(k);
+                    }
+                    
+                    finalBlob.set(ANCHOR_TXT_END, seg.start + 4 + writeLen);
+                }
+
                 streamPtr += writeLen;
                 segIdx++;
             }
 
-            // Download
             downloadBlob(new Blob([finalBlob], { type: "video/mp4" }), `injected_part${injectionState.partIndex}_${carrier.name}`);
             
             injectionState.offset += chunkLen;
-            
             if (isLastPart) {
                 logMsg(`> <span class="success">ALL PARTS INJECTED.</span>`);
                 resetInjectionState();
             } else {
                 injectionState.partIndex++;
-                const pct = Math.round((injectionState.offset / blobSize) * 100);
-                logMsg(`> <span class="warn">PART ${injectionState.partIndex-1} COMPLETE.</span> ${pct}% Done.`);
-                logMsg(`> <b>PLEASE LOAD NEXT CARRIER</b> for Part ${injectionState.partIndex}.`);
+                const pct = Math.round((injectionState.offset / totalSize) * 100);
+                logMsg(`> Part ${injectionState.partIndex-1} Done. Load Next.`);
                 document.getElementById('injectBtn').innerText = `INJECT PART ${injectionState.partIndex}`;
-                document.getElementById('injectBtn').disabled = true; // Wait for new file
+                document.getElementById('injectBtn').disabled = true;
                 document.getElementById('progress-container').style.display = 'block';
                 document.getElementById('progress-bar').style.width = pct + '%';
             }
         }
 
-        // --- 3. EXTRACTION (V22 ANCHOR TRUST) ---
+        function resetInjectionState() {
+            injectionState = { active: false, payloadData: null, offset: 0, sessionID: 0, partIndex: 1, mode: "BINARY" };
+            document.getElementById('progress-container').style.display = 'none';
+            updateInjectButtonState();
+        }
 
+        // --- 3. EXTRACTION ---
+        
         async function extractPayload() {
             if (!carrier.buffer) return;
-
-            // 1. Recover Stream
             const uint8 = new Uint8Array(carrier.buffer);
-            const chunks = [];
+            
+            let binaryChunks = [];
+            let textChunks = [];
+
             let i = 0;
-            // Scan for 4-byte anchor + 1 byte len
-            while (i < uint8.length - 6) {
-                // Check 4-Byte Anchor
-                if (uint8[i] === FRAME_ANCHOR[0] && 
-                    uint8[i+1] === FRAME_ANCHOR[1] && 
-                    uint8[i+2] === FRAME_ANCHOR[2] && 
-                    uint8[i+3] === FRAME_ANCHOR[3]) {
-                    
-                    const lenByte = uint8[i+4];
-                    if (lenByte > 0) {
-                        // V22 Update: We TRUST the anchor. 
-                        // Random chance of collision is 1/4,294,967,296.
-                        // We do NOT check the terminator byte, because binary files
-                        // might end the segment with non-standard chars (not just \n).
-                        
-                        chunks.push(uint8.slice(i + 5, i + 5 + lenByte));
-                        i += (lenByte + 5);
+            while(i < uint8.length - 8) {
+                // 1. Binary Check
+                if (uint8[i]===ANCHOR_BIN[0] && uint8[i+1]===ANCHOR_BIN[1] && uint8[i+2]===ANCHOR_BIN[2] && uint8[i+3]===ANCHOR_BIN[3]) {
+                    const len = uint8[i+4];
+                    if (len > 0 && (i+5+len) <= uint8.length) {
+                        binaryChunks.push(uint8.slice(i+5, i+5+len));
+                        i += (5 + len);
+                        continue;
+                    }
+                }
+                // 2. Text Check (Strict V24)
+                else if (uint8[i]===ANCHOR_TXT_START[0] && uint8[i+1]===ANCHOR_TXT_START[1] && uint8[i+2]===ANCHOR_TXT_START[2] && uint8[i+3]===ANCHOR_TXT_START[3]) {
+                    let endIdx = -1;
+                    // Limit scan to 2KB
+                    for(let j=i+4; j < Math.min(i+2000, uint8.length-3); j++) {
+                        if (uint8[j]===ANCHOR_TXT_END[0] && uint8[j+1]===ANCHOR_TXT_END[1] && uint8[j+2]===ANCHOR_TXT_END[2] && uint8[j+3]===ANCHOR_TXT_END[3]) {
+                            endIdx = j;
+                            break;
+                        }
+                    }
+                    if (endIdx !== -1) {
+                        const content = uint8.slice(i+4, endIdx);
+                        // V24 VALIDATION: Must be valid Base64 chars ONLY
+                        if (isValidBase64Content(content)) {
+                            textChunks.push(content);
+                        } else {
+                           // logMsg(`> Discarded noise fragment at ${i}`);
+                        }
+                        i = endIdx + 4;
                         continue;
                     }
                 }
                 i++;
             }
 
-            if (chunks.length === 0) { logMsg("> No V22 frames found (CAFEBABE)."); return; }
+            if (textChunks.length > 0) {
+                logMsg(`> Detected V23 (Text) Fragments: ${textChunks.length} (Verified)`);
+                const decoder = new TextDecoder();
+                let fullBase64 = "";
+                for(let c of textChunks) fullBase64 += decoder.decode(c);
+                try {
+                    // Check for padding. If not mod 4, add =
+                    while (fullBase64.length % 4 !== 0) fullBase64 += "=";
+                    
+                    const binaryStr = atob(fullBase64);
+                    const len = binaryStr.length;
+                    const bytes = new Uint8Array(len);
+                    for (let k = 0; k < len; k++) bytes[k] = binaryStr.charCodeAt(k);
+                    processStream(bytes);
+                } catch(e) {
+                    logMsg(`> <span class="err">Base64 Error:</span> ${e.message}`);
+                }
+            } else if (binaryChunks.length > 0) {
+                logMsg(`> Detected V22 (Binary) Fragments: ${binaryChunks.length}`);
+                let totalLen = binaryChunks.reduce((acc, c) => acc + c.length, 0);
+                let stream = new Uint8Array(totalLen);
+                let ptr = 0;
+                binaryChunks.forEach(c => { stream.set(c, ptr); ptr += c.length; });
+                processStream(stream);
+            } else {
+                logMsg("> No valid payload found.");
+            }
+        }
+        
+        // V24 Validator
+        function isValidBase64Content(u8) {
+            for(let k=0; k<u8.length; k++) {
+                const b = u8[k];
+                // A-Z (65-90), a-z (97-122), 0-9 (48-57), + (43), / (47), = (61)
+                // Also allowing newline/CR (10, 13) just in case
+                if ( (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || 
+                      b === 43 || b === 47 || b === 61 || b === 10 || b === 13 ) {
+                    continue;
+                }
+                return false;
+            }
+            return true;
+        }
 
-            // 2. Reassemble Stream
-            let totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
-            let stream = new Uint8Array(totalLen);
-            let ptr = 0;
-            chunks.forEach(c => { stream.set(c, ptr); ptr += c.length; });
-
-            // 3. Find Payload Start
+        function processStream(stream) {
             const pStart = findSequence(stream, POLYGLOT_PREFIX);
             if (pStart === -1) { logMsg("> Prefix Marker broken."); return; }
             
             const headerStart = pStart + POLYGLOT_PREFIX.length;
-            
-            // 4. Parse Header
             if (stream.length < headerStart + 10) { logMsg("> Stream too short."); return; }
             
             const headerView = new DataView(stream.buffer, stream.byteOffset + headerStart, 10);
@@ -363,128 +488,60 @@
             const partIdx = headerView.getUint8(4);
             const flags = headerView.getUint8(5);
             const chunkLength = headerView.getUint32(6);
-            
             const isEOF = (flags & 0x01) !== 0;
 
-            logMsg(`> <span class="info">DETECTED PART ${partIdx}</span> (Len: ${chunkLength})`);
-
-            // 5. Extract Exact Chunk
+            logMsg(`> Part ${partIdx} Detected (Len: ${chunkLength})`);
+            
             const chunkStart = headerStart + 10;
-            
-            if (stream.length < chunkStart + chunkLength) {
-                logMsg(`> <span class="err">ERROR:</span> Stream truncation. Expected ${chunkLength}, got ${stream.length - chunkStart}`);
-                logMsg(`> Missing: ${chunkLength - (stream.length - chunkStart)} bytes.`);
-            }
-            
-            // Ensure we don't slice OOB
             const safeEnd = Math.min(stream.length, chunkStart + chunkLength);
             const chunkData = stream.slice(chunkStart, safeEnd);
 
-            // 6. Assembly Logic
-            if (assemblyState.sessionID === null) {
-                assemblyState.sessionID = sessionID;
-                logMsg("> Started new assembly session.");
-            } else if (assemblyState.sessionID !== sessionID) {
-                logMsg(`> <span class="warn">WARNING:</span> Session ID mismatch! Discarding old session.`);
-                assemblyState = { parts: {}, totalParts: 0, sessionID: sessionID, expectedName: "" };
+            if (assemblyState.sessionID !== null && assemblyState.sessionID !== sessionID) {
+                logMsg("> Session ID changed. Resetting.");
+                assemblyState = { parts: {}, totalParts: 0, sessionID: sessionID };
             }
-
+            assemblyState.sessionID = sessionID;
             assemblyState.parts[partIdx] = chunkData;
-            
             if (isEOF) assemblyState.totalParts = partIdx;
 
-            const partsHave = Object.keys(assemblyState.parts).length;
-            const partsNeed = assemblyState.totalParts || "?";
-            
-            logMsg(`> Assembly Status: [${partsHave} / ${partsNeed}]`);
+            const have = Object.keys(assemblyState.parts).length;
+            const need = assemblyState.totalParts || "?";
+            logMsg(`> Progress: [${have} / ${need}]`);
 
-            if (assemblyState.totalParts > 0 && partsHave === assemblyState.totalParts) {
-                logMsg("> All parts present. Reassembling...");
+            if (assemblyState.totalParts > 0 && have === assemblyState.totalParts) {
                 finalizeAssembly();
-            } else {
-                logMsg(`> Waiting for more parts... Drop next file.`);
             }
         }
 
         async function finalizeAssembly() {
-            // Concat
             let size = 0;
             for(let i=1; i<=assemblyState.totalParts; i++) size += assemblyState.parts[i].length;
-            
-            const fullPayload = new Uint8Array(size);
+            const full = new Uint8Array(size);
             let ptr = 0;
             for(let i=1; i<=assemblyState.totalParts; i++) {
-                fullPayload.set(assemblyState.parts[i], ptr);
+                full.set(assemblyState.parts[i], ptr);
                 ptr += assemblyState.parts[i].length;
             }
 
             try {
-                // NO DECRYPTION
-                const view = new DataView(fullPayload.buffer);
-                const nameLen = view.getUint16(0); 
-                
-                if (nameLen > 255 || nameLen <= 0) {
-                     throw new Error(`Invalid Filename Length: ${nameLen}`);
-                }
-
-                const name = new TextDecoder().decode(fullPayload.slice(2, 2 + nameLen));
-                const fileData = fullPayload.slice(2 + nameLen);
-                
-                logMsg(`> <span class="success">SUCCESS:</span> Extracted ${name}`);
-                logMsg(`> Size: ${formatBytes(fileData.length)}`);
-                downloadBlob(new Blob([fileData]), name);
-                
-                assemblyState = { parts: {}, totalParts: 0, sessionID: null, expectedName: "" };
-            } catch (e) {
-                console.error(e);
-                logMsg(`> <span class="err">EXTRACTION FAILED:</span> ${e.message}`);
-            }
+                const view = new DataView(full.buffer);
+                const nameLen = view.getUint16(0);
+                const name = new TextDecoder().decode(full.slice(2, 2 + nameLen));
+                const data = full.slice(2 + nameLen);
+                logMsg(`> <span class="success">EXTRACTED:</span> ${name} (${formatBytes(data.length)})`);
+                downloadBlob(new Blob([data]), name);
+                assemblyState = { parts: {}, totalParts: 0, sessionID: null };
+            } catch(e) { logMsg("> Extract Error: " + e.message); }
         }
-
 
         // --- HELPERS ---
-        function updateInjectButtonState() {
-            if (injectionState.active) {
-                document.getElementById('injectBtn').disabled = false;
-                document.getElementById('injectBtn').innerText = `INJECT PART ${injectionState.partIndex}`;
-                document.getElementById('fileInputPayload').disabled = true;
-            } else {
-                const ready = payload.buffer && carrier.buffer;
-                document.getElementById('injectBtn').disabled = !ready;
-                document.getElementById('injectBtn').innerText = "INJECT";
-                document.getElementById('fileInputPayload').disabled = false;
-            }
+        function blobToBase64(blob) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(blob);
+            });
         }
-
-        function resetInjectionState() {
-            injectionState = { active: false, payloadBlob: null, offset: 0, sessionID: 0, partIndex: 1 };
-            document.getElementById('progress-container').style.display = 'none';
-            document.getElementById('fileInputPayload').disabled = false;
-            document.getElementById('injectBtn').innerText = "INJECT";
-            checkReadyState();
-        }
-
-        function checkReadyState() {
-            if (!injectionState.active) {
-                document.getElementById('injectBtn').disabled = !(payload.buffer && carrier.buffer);
-            }
-        }
-        
-        async function handlePayload(file) {
-            if (injectionState.active) {
-                if(!confirm("Cancel current spanning operation?")) return;
-                resetInjectionState();
-            }
-            logMsg(`> Staging: ${file.name} (${formatBytes(file.size)})`);
-            payload.name = file.name;
-            payload.buffer = await file.arrayBuffer();
-            document.getElementById('payload-name').innerText = file.name;
-            document.getElementById('payload-meta').innerText = formatBytes(file.size);
-            document.getElementById('zone-payload').classList.add('active');
-            updateInjectButtonState();
-        }
-
-        // --- UTILS ---
         function findSequence(data, seq) {
             for (let i = 0; i < data.length - seq.length; i++) {
                 if (matchAt(data, seq, i)) return i;
