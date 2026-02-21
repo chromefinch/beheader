@@ -18,7 +18,10 @@ $ subtitle_injector.py <output> <video> -H subtitle_injector.html -S 2
 ![Upload](images/upload.jpg)
 ![midDownload](images/midDownload.jpg)
 ![Download](images/perfectDownload.jpg)
+![CDR](images/cdr.png)
 
+Goal is to bypass CDR:
+https://metadefender.com/results/file/bzI2MDIyMFBrTEMxenlMYlpob3hJWWxSY28_mdaas
 
 **Positional arguments:**
 - `output` - Path of resulting polyglot file.
