@@ -13,7 +13,7 @@ $ bun run beheader.js <output> <image> <video|audio> [-options] [appendable...]
 ```
 Subtitle Injector 
 ```
-$ subtitle_injector.py <output> <video> -H subtitle_injector.html -S 2
+$ subtitle_injector_encrypt.py <output> <video> -H subtitle_injector.html -S 2
 ```
 ![Upload](images/upload.jpg)
 ![midDownload](images/midDownload.jpg)
