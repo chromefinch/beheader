@@ -14,13 +14,13 @@ The main objective of this repo has evolved into sneaking payloads past strict f
 
 See the results here: [Metadefender Report](https://metadefender.com/results/file/bzI2MDIyMFBrTEMxenlMYlpob3hJWWxSY28_mdaas)
 
-\!\[Upload\](images/upload.jpg)
+![Upload](images/upload.jpg)
 
-\!\[midDownload\](images/midDownload.jpg)
+![midDownload](images/midDownload.jpg)
 
-\!\[Download\](images/perfectDownload.jpg)
+![Download](images/perfectDownload.jpg)
 
-\!\[CDR\](images/cdr.png)
+![CDR](images/cdr.png)
 
 ## **How The Subtitle Exploit Works**
 
