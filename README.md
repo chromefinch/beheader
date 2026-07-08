@@ -73,7 +73,7 @@ If you need to retrieve the injected data without visiting the polyglot webpage 
 
 ## **Usage**
 
-The CLI tool acts as the heavy lifter for dropping HTML into MP4s via subtitle tracks and allocating space for the web GUI.
+The CLI tool acts as the heavy lifter for dropping HTML into MP4s via subtitle tracks and allocating space (Megabytes/MB) for the web GUI.
 
 \# Basic usage  
 $ python3 subtitle\_injector\_encrypt.py \<output\> \<video\> \-H subtitle\_injector\_encrypt.html \-S 2
@@ -82,7 +82,7 @@ $ python3 subtitle\_injector\_encrypt.py \<output\> \<video\> \-H subtitle\_inje
 $ python3 subtitle\_injector\_encrypt.py play.mp4 raw\_video.mov \--html subtitle\_injector\_encrypt.html
 
 \# Example: Pre-allocate 5MB inside the subtitle stream for a larger payload later  
-$ python3 subtitle\_injector\_encrypt.py output.mp4 video.mp4 \--html subtitle\_injector\_encrypt.html \--size 5.0
+$ python3 subtitle\_injector\_encrypt.py output.mp4 video.mp4 \--html subtitle\_injector\_encrypt.html \--size 5
 
 **Options:**
 
