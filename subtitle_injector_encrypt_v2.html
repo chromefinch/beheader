@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Scatter-Gather Injector (Encrypted)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root { 
+            --bg: #121212; 
+            --surface: #1e1e1e; 
+            --surface-hover: #2c2c2c;
+            --text-primary: #e0e0e0; 
+            --text-secondary: #aaaaaa;
+            --accent: #64ffda;
+            --primary: #bb86fc;
+            --primary-hover: #9965f4;
+            --err: #cf6679; 
+            --success: #03dac6; 
+            --warn: #ffb74d; 
+            --dim: var(--text-secondary);
+            --divider: rgba(255, 255, 255, 0.12);
+            --shadow-1: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            --shadow-2: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
+        }
+
+        #_p {
+            background-color: #121212 !important;
+        }
+        
+        body { 
+            background: var(--bg); 
+            color: var(--text-primary); 
+            font-family: 'Roboto', sans-serif; 
+            padding: 24px 40px; 
+            height: 100vh; 
+            box-sizing: border-box;
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+            margin: 0;
+        }
+        
+        h1 { 
+            font-size: 22px; 
+            font-weight: 500;
+            border-bottom: 1px solid var(--divider); 
+            padding-bottom: 16px; 
+            margin-top: 0; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            letter-spacing: 0.5px;
+        }
+
+        #system-status {
+            font-size: 13px;
+            font-weight: 500;
+            background: var(--surface);
+            padding: 6px 14px;
+            border-radius: 16px;
+            border: 1px solid var(--divider);
+            box-shadow: var(--shadow-1);
+        }
+        
+        /* Zones */
+        .zone-container { display: flex; gap: 24px; height: 160px; margin-bottom: 24px; margin-top: 8px; }
+        .drop-zone { 
+            flex: 1; 
+            background: var(--surface); 
+            border: 2px dashed var(--divider); 
+            border-radius: 16px;
+            display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; 
+            cursor: pointer; 
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
+            position: relative;
+            box-shadow: var(--shadow-1);
+        }
+        .drop-zone:hover { 
+            border-color: var(--text-secondary); 
+            background: var(--surface-hover); 
+            box-shadow: var(--shadow-2);
+            transform: translateY(-2px);
+        }
+        .drop-zone.active { 
+            border: 2px solid var(--primary); 
+            background: rgba(187, 134, 252, 0.05);
+            box-shadow: 0 0 12px rgba(187, 134, 252, 0.15);
+        }
+        .drop-zone.active:hover {
+            background: rgba(187, 134, 252, 0.08);
+            border-color: var(--primary-hover);
+        }
+        .drop-zone.active .label { color: var(--primary); }
+        
+        .label { 
+            font-size: 13px; 
+            text-transform: uppercase; 
+            letter-spacing: 1.5px; 
+            font-weight: 700; 
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+            transition: color 0.3s;
+        }
+        .filename { 
+            color: var(--text-primary); 
+            font-size: 14px; 
+            word-break: break-all; 
+            max-width: 90%; 
+            text-align: center; 
+            font-family: 'Roboto Mono', monospace;
+            margin-bottom: 4px;
+        }
+        .meta { font-size: 12px; color: var(--text-secondary); }
+
+        /* Controls */
+        .controls { display: flex; gap: 16px; margin-bottom: 16px; align-items: center; justify-content: flex-end;}
+        
+        .controls label {
+            font-size: 13px; 
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        select { 
+            background: var(--surface); 
+            color: var(--text-primary); 
+            border: 1px solid var(--divider); 
+            padding: 8px 12px; 
+            border-radius: 8px;
+            font-family: 'Roboto', sans-serif; 
+            font-size: 13px; 
+            cursor: pointer;
+            outline: none;
+            transition: border 0.3s, box-shadow 0.3s;
+            box-shadow: var(--shadow-1);
+        }
+        select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(187,134,252,0.2);
+        }
+
+        /* Log */
+        #info-panel { 
+            flex-grow: 1; 
+            background: #080808; 
+            border-radius: 12px;
+            padding: 16px; 
+            font-family: 'Roboto Mono', monospace;
+            font-size: 13px; 
+            color: #b0b0b0; 
+            overflow-y: auto; 
+            white-space: pre-wrap; 
+            margin-bottom: 20px; 
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.5);
+            border: 1px solid var(--divider);
+        }
+        .log-entry { margin-bottom: 6px; line-height: 1.4; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 6px; }
+        .log-entry:last-child { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+        .success { color: var(--success); font-weight: 500; } 
+        .err { color: var(--err); font-weight: 500; } 
+        .warn { color: var(--warn); font-weight: 500; } 
+        .info { color: var(--accent); }
+        
+        /* Footer */
+        .footer { display: flex; gap: 16px; justify-content: flex-end; padding-bottom: 10px; }
+        
+        button { 
+            background: var(--surface); 
+            color: var(--primary); 
+            border: 1px solid var(--divider); 
+            padding: 10px 24px; 
+            border-radius: 8px;
+            cursor: pointer; 
+            font-family: 'Roboto', sans-serif; 
+            font-weight: 500;
+            text-transform: uppercase; 
+            font-size: 14px; 
+            letter-spacing: 1px;
+            transition: all 0.2s ease;
+            box-shadow: var(--shadow-1);
+        }
+        button#injectBtn {
+            background: var(--primary);
+            color: #000;
+            border: none;
+        }
+        button#injectBtn:hover:not(:disabled) {
+            background: var(--primary-hover);
+            box-shadow: var(--shadow-2);
+            transform: translateY(-1px);
+        }
+        button:hover:not(:disabled) { 
+            background: var(--surface-hover); 
+            border-color: var(--primary);
+        }
+        button:active:not(:disabled) {
+            transform: translateY(0);
+            box-shadow: var(--shadow-1);
+        }
+        button:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed; 
+            box-shadow: none;
+            background: var(--surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--divider);
+        }
+        
+        input[type="file"] { display: none; }
+
+        input[type="text"] {
+            background: var(--surface); 
+            color: var(--text-primary); 
+            border: 1px solid var(--divider); 
+            padding: 8px 12px; 
+            border-radius: 8px;
+            font-family: 'Roboto', sans-serif; 
+            font-size: 13px; 
+            outline: none;
+            transition: border 0.3s, box-shadow 0.3s;
+            box-shadow: var(--shadow-1);
+        }
+        input[type="text"]:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(187,134,252,0.2);
+        }
+
+        
+        /* Progress Bar for Spanning */
+        #progress-container { 
+            display:none; 
+            width: 100%; 
+            height: 6px; 
+            background: var(--surface); 
+            margin-bottom: 16px; 
+            border-radius: 3px;
+            overflow: hidden;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+        }
+        #progress-bar { 
+            height: 100%; 
+            background: var(--primary); 
+            width: 0%; 
+            transition: width 0.4s ease-out; 
+            border-radius: 3px;
+        }
+        
+        /* Scrollbar styling for log */
+        #info-panel::-webkit-scrollbar { width: 8px; }
+        #info-panel::-webkit-scrollbar-track { background: #080808; border-radius: 4px; }
+        #info-panel::-webkit-scrollbar-thumb { background: var(--surface-hover); border-radius: 4px; }
+        #info-panel::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+    </style>
+</head>
+<body>
+
+    <h1>
+        <span>Scatter-Gather Injector (Encrypted)</span>
+        <span id="system-status" style="color:var(--dim)">IDLE</span>
+    </h1>
+
+    <div class="zone-container">
+        <div id="zone-carrier" class="drop-zone" onclick="document.getElementById('fileInputCarrier').click()">
+            <div class="label">1. CARRIER (VIDEO)</div>
+            <div class="filename" id="carrier-name"></div>
+            <div class="meta" id="carrier-meta"></div>
+            <input type="file" id="fileInputCarrier" accept=".mp4,.m4v">
+        </div>
+
+        <div id="zone-payload" class="drop-zone" onclick="document.getElementById('fileInputPayload').click()">
+            <div class="label">2. PAYLOAD (ANY)</div>
+            <div class="filename" id="payload-name"></div>
+            <div class="meta" id="payload-meta"></div>
+            <input type="file" id="fileInputPayload">
+        </div>
+    </div>
+
+    <div class="controls">
+        
+        <label for="encryptKey">KEY (OPTIONAL):</label>
+        <input type="text" id="encryptKey" placeholder="Encryption Key">
+
+
+    </div>
+
+    <div id="info-panel"><div class="log-entry">> WAITING FOR INPUT...</div></div>
+
+    <div id="progress-container"><div id="progress-bar"></div></div>
+
+    <div class="footer">
+        <button id="extractBtn" onclick="extractPayload()" disabled>EXTRACT</button>
+        <button id="injectBtn" onclick="injectPayload()" disabled>INJECT</button>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const MARKER_FRESH = "$$POLYGLOT_PAYLOAD_START$$";
+        const POLYGLOT_PREFIX_STR = "\n-->\n";
+        const POLYGLOT_PREFIX = new TextEncoder().encode(POLYGLOT_PREFIX_STR); 
+        const POLYGLOT_SUFFIX = new TextEncoder().encode("<!--");
+        const MAGIC_FOOTER = new TextEncoder().encode("$$CPM10_EOF$$");
+        
+        // V23: Text Anchors ({{{{ and }}}} in ASCII)
+        const ANCHOR_TXT_START = [0x7B, 0x7B, 0x7B, 0x7B]; 
+        const ANCHOR_TXT_END = [0x7D, 0x7D, 0x7D, 0x7D];
+
+        const US_CONSTITUTION = "We the People of the United States, in Order to form a more perfect Union, establish Justice, insure domestic Tranquility, provide for the common defence, promote the general Welfare, and secure the Blessings of Liberty to ourselves and our Posterity, do ordain and establish this Constitution for the United States of America. ";
+        const CONST_BYTES = new TextEncoder().encode(US_CONSTITUTION);
+        const CONST_LEN = CONST_BYTES.length;
+        
+        // --- STATE MANAGEMENT ---
+        let carrier = { buffer: null, name: "", startOffset: -1, segments: [] };
+        let payload = { buffer: null, name: "" };
+        
+        let injectionState = {
+            active: false,
+            payloadData: null, // Uint8Array
+            offset: 0,
+            sessionID: 0,
+            partIndex: 1,
+            mode: "TEXT"
+        };
+
+        let assemblyState = {
+            parts: {}, 
+            totalParts: 0,
+            sessionID: null
+        };
+
+        const log = document.getElementById('info-panel');
+
+        // --- 1. CARRIER HANDLING ---
+        
+        async function handleCarrier(file) {
+            logMsg(`> Scanning Carrier: ${file.name} (${formatBytes(file.size)})`);
+            carrier.name = file.name;
+            document.getElementById('carrier-name').innerText = file.name;
+            document.getElementById('zone-carrier').classList.add('active');
+
+            try {
+                const buffer = await file.arrayBuffer();
+                carrier.buffer = buffer;
+                const uint8 = new Uint8Array(buffer);
+                
+                // Markers
+                const freshOffset = findSequence(uint8, new TextEncoder().encode(MARKER_FRESH));
+                const injectedOffset = findSequence(uint8, POLYGLOT_PREFIX);
+                
+                let searchStart = 0;
+                if (injectedOffset !== -1) {
+                    logMsg(`> Detected Existing Injection.`);
+                    searchStart = injectedOffset + POLYGLOT_PREFIX.length;
+                    document.getElementById('extractBtn').disabled = false;
+                } else if (freshOffset !== -1) {
+                    searchStart = freshOffset + MARKER_FRESH.length;
+                    document.getElementById('extractBtn').disabled = true;
+                } else {
+                    document.getElementById('extractBtn').disabled = false;
+                }
+
+                carrier.startOffset = searchStart;
+                carrier.segments = mapWritableSegments(uint8, 0);
+                
+                updateCapacityDisplay();
+                updateInjectButtonState();
+            } catch (e) {
+                logMsg(`> Error reading carrier: ${e.message}`);
+            }
+        }
+
+        function mapWritableSegments(uint8, startIdx) {
+            const segments = [];
+            const CONST_DOUBLE = US_CONSTITUTION + US_CONSTITUTION;
+            let lineStart = -1;
+            
+            for (let i = startIdx; i <= uint8.length; i++) {
+                if (i === uint8.length || uint8[i] === 10 || uint8[i] === 13) {
+                    if (lineStart !== -1) {
+                        const len = i - lineStart;
+                        if (len > 3 && len <= 100) {
+                            let lineStr = "";
+                            for(let k=lineStart; k<i; k++) {
+                                lineStr += String.fromCharCode(uint8[k]);
+                            }
+                            if (CONST_DOUBLE.includes(lineStr)) {
+                                segments.push({ start: lineStart, len: len });
+                            }
+                        }
+                        lineStart = -1;
+                    }
+                } else {
+                    if (lineStart === -1) lineStart = i;
+                }
+            }
+            return segments;
+        }
+
+        function updateCapacityDisplay() {
+            if(!carrier.segments.length) return;
+            const mode = "TEXT";
+            
+            let cap = 0;
+            // Text Mode: Payload is Base64 (1.33x) + 8 byte overhead
+            let rawCap = carrier.segments.reduce((acc, s) => (s.len > 8) ? acc + (s.len - 8) : acc, 0);
+            cap = Math.floor(rawCap / 1.34); 
+            
+            document.getElementById('carrier-meta').innerText = `CAP (${mode}): ~${formatBytes(cap)}`;
+            logMsg(`> Capacity [${mode}]: ~${formatBytes(cap)}`);
+        }
+
+        async function handlePayload(file) {
+            if (injectionState.active) {
+                if(!confirm("Cancel current spanning operation?")) return;
+                resetInjectionState();
+            }
+            logMsg(`> Staging: ${file.name} (${formatBytes(file.size)})`);
+            try {
+                payload.name = file.name;
+                payload.buffer = await file.arrayBuffer();
+                document.getElementById('payload-name').innerText = file.name;
+                document.getElementById('payload-meta').innerText = formatBytes(file.size);
+                document.getElementById('zone-payload').classList.add('active');
+                updateInjectButtonState();
+            } catch (e) {
+                logMsg(`> Error reading payload: ${e.message}`);
+            }
+        }
+
+        function updateInjectButtonState() {
+            const btn = document.getElementById('injectBtn');
+            if (injectionState.active) {
+                btn.disabled = false;
+                btn.innerText = `INJECT PART ${injectionState.partIndex}`;
+                document.getElementById('fileInputPayload').disabled = true;
+            } else {
+                const ready = payload.buffer && carrier.buffer;
+                btn.disabled = !ready;
+                btn.innerText = "INJECT";
+                document.getElementById('fileInputPayload').disabled = false;
+            }
+        }
+
+        // --- 2. INJECTION (HYBRID) ---
+
+        async function injectPayload() {
+            const mode = "TEXT";
+
+            // Step A: Initial Packaging (Raw Binary)
+            if (!injectionState.active) {
+                if (!payload.buffer) return;
+                logMsg(`> Packaging Payload...`);
+                
+                const nameBytes = new TextEncoder().encode(payload.name);
+                const cleartextLen = 2 + nameBytes.length + payload.buffer.byteLength;
+                const cleartext = new Uint8Array(cleartextLen);
+                const view = new DataView(cleartext.buffer);
+                view.setUint16(0, nameBytes.length); 
+                cleartext.set(nameBytes, 2);
+                cleartext.set(new Uint8Array(payload.buffer), 2 + nameBytes.length);
+
+                const encKey = document.getElementById('encryptKey').value;
+                injectionState.payloadData = xorCipher(cleartext, encKey); // Uint8Array
+                injectionState.sessionID = Math.floor(Math.random() * 0xFFFFFFFF);
+                injectionState.offset = 0;
+                injectionState.partIndex = 1;
+                injectionState.active = true;
+                injectionState.mode = mode;
+                
+                logMsg(`> Payload Size: ${formatBytes(injectionState.payloadData.length)}`);
+            }
+
+            // Step B: Calculate Allocation
+            const HEADER_SIZE = 10;
+            const POLY_OVERHEAD = POLYGLOT_PREFIX.length + HEADER_SIZE + MAGIC_FOOTER.length + POLYGLOT_SUFFIX.length;
+            
+            let availableSpace = 0;
+            const overheadPerSeg = 8;
+            
+            let rawCap = carrier.segments.reduce((acc, s) => (s.len > 8) ? acc + (s.len - 8) : acc, 0);
+            availableSpace = Math.floor(rawCap / 1.34) - POLY_OVERHEAD - 100;
+
+            if (availableSpace <= 0) {
+                logMsg(`> <span class="err">ERROR:</span> Carrier too small.`);
+                return;
+            }
+
+            const totalSize = injectionState.payloadData.length;
+            const remaining = totalSize - injectionState.offset;
+            const isLastPart = (remaining <= availableSpace);
+            const chunkLen = isLastPart ? remaining : availableSpace;
+
+            // Slice Raw Bytes
+            const chunkData = injectionState.payloadData.slice(injectionState.offset, injectionState.offset + chunkLen);
+
+            // Construct Protocol Stream (Binary)
+            const spanHeader = new Uint8Array(HEADER_SIZE);
+            const dv = new DataView(spanHeader.buffer);
+            dv.setUint32(0, injectionState.sessionID);
+            dv.setUint8(4, injectionState.partIndex);
+            dv.setUint8(5, isLastPart ? 0x01 : 0x00);
+            dv.setUint32(6, chunkLen);
+
+            const streamTotal = POLYGLOT_PREFIX.length + spanHeader.length + chunkData.length + MAGIC_FOOTER.length + POLYGLOT_SUFFIX.length;
+            const stream = new Uint8Array(streamTotal);
+            let ptr = 0;
+            stream.set(POLYGLOT_PREFIX, ptr); ptr += POLYGLOT_PREFIX.length;
+            stream.set(spanHeader, ptr); ptr += spanHeader.length;
+            stream.set(chunkData, ptr); ptr += chunkData.length;
+            stream.set(MAGIC_FOOTER, ptr); ptr += MAGIC_FOOTER.length;
+            stream.set(POLYGLOT_SUFFIX, ptr);
+
+            // Prepare Injection Data
+            let finalInjectionData; // Either Uint8Array or String
+            
+            // Convert entire stream to Base64 String for Text Mode
+            finalInjectionData = await blobToBase64(new Blob([stream]));
+
+            logMsg(`> Injecting Part ${injectionState.partIndex} (${mode})...`);
+
+            const finalBlob = new Uint8Array(carrier.buffer);
+            let streamPtr = 0;
+            const dataLen = finalInjectionData.length;
+            
+            // Allocation Loop
+            let startSegIdx = -1;
+            let foundCapacity = 0;
+            
+            for (let i = carrier.segments.length - 1; i >= 0; i--) {
+                const segCap = Math.max(0, carrier.segments[i].len - overheadPerSeg);
+                foundCapacity += segCap;
+                if (foundCapacity >= dataLen) {
+                    startSegIdx = i;
+                    break;
+                }
+            }
+
+            if (startSegIdx === -1) { logMsg("> Alloc Fail."); return; }
+
+            let segIdx = startSegIdx;
+            
+            while (streamPtr < dataLen && segIdx < carrier.segments.length) {
+                const seg = carrier.segments[segIdx];
+                if (seg.len <= overheadPerSeg) { segIdx++; continue; }
+                
+                const writeLen = Math.min(seg.len - overheadPerSeg, dataLen - streamPtr);
+                
+                // [{{{{] [BASE64] [}}}}]
+                finalBlob.set(ANCHOR_TXT_START, seg.start);
+                
+                const chunkStr = finalInjectionData.substring(streamPtr, streamPtr+writeLen);
+                for(let k=0; k<chunkStr.length; k++) {
+                    finalBlob[seg.start + 4 + k] = chunkStr.charCodeAt(k);
+                }
+                
+                finalBlob.set(ANCHOR_TXT_END, seg.start + 4 + writeLen);
+
+                streamPtr += writeLen;
+                segIdx++;
+            }
+
+            let outName = `injected_${carrier.name}`;
+            if (injectionState.partIndex > 1) {
+                outName = `injected_part${injectionState.partIndex}_${carrier.name}`;
+            }
+            downloadBlob(new Blob([finalBlob], { type: "video/mp4" }), outName);
+            
+            injectionState.offset += chunkLen;
+            if (isLastPart) {
+                logMsg(`> <span class="success">ALL PARTS INJECTED.</span>`);
+                resetInjectionState();
+            } else {
+                injectionState.partIndex++;
+                const pct = Math.round((injectionState.offset / totalSize) * 100);
+                logMsg(`> Part ${injectionState.partIndex-1} Done. Load Next.`);
+                document.getElementById('injectBtn').innerText = `INJECT PART ${injectionState.partIndex}`;
+                document.getElementById('injectBtn').disabled = true;
+                document.getElementById('progress-container').style.display = 'block';
+                document.getElementById('progress-bar').style.width = pct + '%';
+            }
+        }
+
+        function resetInjectionState() {
+            injectionState = { active: false, payloadData: null, offset: 0, sessionID: 0, partIndex: 1, mode: "TEXT" };
+            document.getElementById('progress-container').style.display = 'none';
+            updateInjectButtonState();
+        }
+
+        // --- 3. EXTRACTION ---
+        
+        async function extractPayload() {
+            if (!carrier.buffer) return;
+            const uint8 = new Uint8Array(carrier.buffer);
+            
+            let textChunks = [];
+
+            let i = 0;
+            while(i < uint8.length - 8) {
+                // Text Check (Strict V24)
+                if (uint8[i]===ANCHOR_TXT_START[0] && uint8[i+1]===ANCHOR_TXT_START[1] && uint8[i+2]===ANCHOR_TXT_START[2] && uint8[i+3]===ANCHOR_TXT_START[3]) {
+                    let endIdx = -1;
+                    // Limit scan to 2KB
+                    for(let j=i+4; j < Math.min(i+2000, uint8.length-3); j++) {
+                        if (uint8[j]===ANCHOR_TXT_END[0] && uint8[j+1]===ANCHOR_TXT_END[1] && uint8[j+2]===ANCHOR_TXT_END[2] && uint8[j+3]===ANCHOR_TXT_END[3]) {
+                            endIdx = j;
+                            break;
+                        }
+                    }
+                    if (endIdx !== -1) {
+                        const content = uint8.slice(i+4, endIdx);
+                        // V24 VALIDATION: Must be valid Base64 chars ONLY
+                        if (isValidBase64Content(content)) {
+                            textChunks.push(content);
+                        } else {
+                           // logMsg(`> Discarded noise fragment at ${i}`);
+                        }
+                        i = endIdx + 4;
+                        continue;
+                    }
+                }
+                i++;
+            }
+
+            if (textChunks.length > 0) {
+                logMsg(`> Detected V23 (Text) Fragments: ${textChunks.length} (Verified)`);
+                const decoder = new TextDecoder();
+                let fullBase64 = "";
+                for(let c of textChunks) fullBase64 += decoder.decode(c);
+                try {
+                    // Check for padding. If not mod 4, add =
+                    while (fullBase64.length % 4 !== 0) fullBase64 += "=";
+                    
+                    const binaryStr = atob(fullBase64);
+                    const len = binaryStr.length;
+                    const bytes = new Uint8Array(len);
+                    for (let k = 0; k < len; k++) bytes[k] = binaryStr.charCodeAt(k);
+                    processStream(bytes);
+                } catch(e) {
+                    logMsg(`> <span class="err">Base64 Error:</span> ${e.message}`);
+                }
+            } else {
+                logMsg("> No valid payload found.");
+            }
+        }
+        
+        // V24 Validator
+        function isValidBase64Content(u8) {
+            for(let k=0; k<u8.length; k++) {
+                const b = u8[k];
+                // A-Z (65-90), a-z (97-122), 0-9 (48-57), + (43), / (47), = (61)
+                // Also allowing newline/CR (10, 13) just in case
+                if ( (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || 
+                      b === 43 || b === 47 || b === 61 || b === 10 || b === 13 ) {
+                    continue;
+                }
+                return false;
+            }
+            return true;
+        }
+
+        function processStream(stream) {
+            const pStart = findSequence(stream, POLYGLOT_PREFIX);
+            if (pStart === -1) { logMsg("> Prefix Marker broken."); return; }
+            
+            const headerStart = pStart + POLYGLOT_PREFIX.length;
+            if (stream.length < headerStart + 10) { logMsg("> Stream too short."); return; }
+            
+            const headerView = new DataView(stream.buffer, stream.byteOffset + headerStart, 10);
+            const sessionID = headerView.getUint32(0);
+            const partIdx = headerView.getUint8(4);
+            const flags = headerView.getUint8(5);
+            const chunkLength = headerView.getUint32(6);
+            const isEOF = (flags & 0x01) !== 0;
+
+            logMsg(`> Part ${partIdx} Detected (Len: ${chunkLength})`);
+            
+            const chunkStart = headerStart + 10;
+            const safeEnd = Math.min(stream.length, chunkStart + chunkLength);
+            const chunkData = stream.slice(chunkStart, safeEnd);
+
+            if (assemblyState.sessionID !== null && assemblyState.sessionID !== sessionID) {
+                logMsg("> Session ID changed. Resetting.");
+                assemblyState = { parts: {}, totalParts: 0, sessionID: sessionID };
+            }
+            assemblyState.sessionID = sessionID;
+            assemblyState.parts[partIdx] = chunkData;
+            if (isEOF) assemblyState.totalParts = partIdx;
+
+            const have = Object.keys(assemblyState.parts).length;
+            const need = assemblyState.totalParts || "?";
+            logMsg(`> Progress: [${have} / ${need}]`);
+
+            if (assemblyState.totalParts > 0 && have === assemblyState.totalParts) {
+                finalizeAssembly();
+            }
+        }
+
+        async function finalizeAssembly() {
+            let size = 0;
+            for(let i=1; i<=assemblyState.totalParts; i++) size += assemblyState.parts[i].length;
+            const full = new Uint8Array(size);
+            let ptr = 0;
+            for(let i=1; i<=assemblyState.totalParts; i++) {
+                full.set(assemblyState.parts[i], ptr);
+                ptr += assemblyState.parts[i].length;
+            }
+
+            const encKey = document.getElementById('encryptKey').value;
+            const decrypted = xorCipher(full, encKey);
+            try {
+                const view = new DataView(decrypted.buffer);
+                const nameLen = view.getUint16(0);
+                const name = new TextDecoder().decode(decrypted.slice(2, 2 + nameLen));
+                const data = decrypted.slice(2 + nameLen);
+                logMsg(`> <span class="success">EXTRACTED:</span> ${name} (${formatBytes(data.length)})`);
+                downloadBlob(new Blob([data]), name);
+                assemblyState = { parts: {}, totalParts: 0, sessionID: null };
+            } catch(e) { logMsg("> Extract Error: " + e.message); }
+        }
+
+        // --- HELPERS ---
+
+        function xorCipher(data, keyStr) {
+            if (!keyStr) return data;
+            const key = new TextEncoder().encode(keyStr);
+            if (key.length === 0) return data;
+            const res = new Uint8Array(data.length);
+            for(let i=0; i<data.length; i++) {
+                res[i] = data[i] ^ key[i % key.length];
+            }
+            return res;
+        }
+
+        function blobToBase64(blob) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(blob);
+            });
+        }
+        function findSequence(data, seq) {
+            for (let i = 0; i < data.length - seq.length; i++) {
+                if (matchAt(data, seq, i)) return i;
+            }
+            return -1;
+        }
+        function matchAt(data, seq, idx) {
+            for (let j = 0; j < seq.length; j++) {
+                if (data[idx + j] !== seq[j]) return false;
+            }
+            return true;
+        }
+        function downloadBlob(blob, name) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = name;
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+        }
+        function logMsg(html) {
+            const d = document.createElement('div'); d.className = 'log-entry'; d.innerHTML = html;
+            log.appendChild(d); log.scrollTop = log.scrollHeight;
+        }
+        function formatBytes(bytes) {
+            if (bytes===0) return '0 B';
+            const k=1024, sizes=['B','KB','MB','GB'], i=Math.floor(Math.log(bytes)/Math.log(k));
+            return parseFloat((bytes/Math.pow(k,i)).toFixed(2))+' '+sizes[i];
+        }
+
+        // Listeners
+        document.getElementById('zone-carrier').addEventListener('drop', ev => { ev.preventDefault(); handleCarrier(ev.dataTransfer.files[0]); });
+        document.getElementById('zone-carrier').addEventListener('dragover', ev => ev.preventDefault());
+        document.getElementById('zone-payload').addEventListener('drop', ev => { ev.preventDefault(); handlePayload(ev.dataTransfer.files[0]); });
+        document.getElementById('zone-payload').addEventListener('dragover', ev => ev.preventDefault());
+        document.getElementById('fileInputCarrier').addEventListener('change', e => handleCarrier(e.target.files[0]));
+        document.getElementById('fileInputPayload').addEventListener('change', e => handlePayload(e.target.files[0]));
+    </script>
+</body>
+</html>
