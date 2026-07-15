@@ -26,6 +26,8 @@ Extract:
 
 ![Download](images/perfectDownload.png)
 
+Upload showing unencrypted payload with CDR failing to remove payload: 
+
 ![CDR](images/cdr.png)
 
 ## **How The Subtitle Exploit Works**
