@@ -14,11 +14,17 @@ The main objective of this repo has evolved into sneaking payloads past strict f
 
 See the results here: [Metadefender Report](https://metadefender.com/results/file/bzI2MDIyMFBrTEMxenlMYlpob3hJWWxSY28_mdaas)
 
-![Upload](images/upload.jpg)
+Create:
 
-![midDownload](images/midDownload.jpg)
+![Create](images/CreateEmailMP4.png)
 
-![Download](images/perfectDownload.jpg)
+Inject:
+
+![Upload](images/upload.png)
+
+Extract:
+
+![Download](images/perfectDownload.png)
 
 ![CDR](images/cdr.png)
 
