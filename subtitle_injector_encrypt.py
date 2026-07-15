@@ -10,7 +10,8 @@ import tempfile
 import zipfile
 from typing import List, Tuple
 import math
-
+# example usage:
+# python3 subtitle_injector_encrypt.py -H subtitle_injector_encrypt.html -S email funnycats.mp4 cats.mp4
 # --- Configuration & Constants ---
 REQUIRED_TOOLS = ["ffmpeg", "mp4edit"]
 # Unique marker to locate the subtitle payload in the binary
@@ -123,7 +124,7 @@ def main():
     parser.add_argument("input_media", help="Path of input video or audio file")
     parser.add_argument("-H", "--html", help="Path to HTML document")
     parser.add_argument("-z", "--zip", action="append", help="Path to ZIP archives")
-    parser.add_argument("-S", "--size", type=float, help="Force allocation size in MB")
+    parser.add_argument("-S", "--size", type=str, help="Force allocation size in MB, or 'email' to target just under 25MB")
     
     args = parser.parse_args()
     check_dependencies()
@@ -197,7 +198,22 @@ def main():
         # Calculate needed size
         alloc_size = int(len(full_payload_content) * 1.5) + 5000
         if args.size:
-            alloc_size = int(args.size * 1024 * 1024)
+            if args.size.lower() == "email":
+                current_mp4_size = os.path.getsize(tmp_mp4_initial)
+                # target size 24.5 MB to be safe for 25MB limits
+                target_size = int(24.5 * 1024 * 1024)
+                
+                # The final size will be: current_mp4_size + track overhead + actual payload size
+                # Since payload size includes the HTML file, the HTML size is already accounted for
+                # inside full_payload_content. 
+                # We allocate space for the payload by adding an underscore padding track.
+                alloc_size = target_size - current_mp4_size
+                
+                if alloc_size < len(full_payload_content):
+                    print(f"Warning: 'email' limit leaves {alloc_size} bytes, which is less than payload ({len(full_payload_content)}). Result may exceed 25MB.", file=sys.stderr)
+                    alloc_size = int(len(full_payload_content) * 1.5) + 5000
+            else:
+                alloc_size = int(float(args.size) * 1024 * 1024)
         
         print(f"[*] Allocating {alloc_size} bytes for payload...")
         
