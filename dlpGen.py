@@ -4,14 +4,10 @@ import random
 import argparse
 import io
 import os
-from datetime import datetime, timedelta
-
 # Example
-# python3 piiGen.py -s 18.7 -o max_email_payload.csv
-
+# python3 dlpGen.py -m pci -s 18 -o max_email_payload.csv
 # --- EXPANDED INPUT LISTS ---
 
-# Top Millennial Names (from BabyCenter)
 FIRST_NAMES = [
     # Millennial Female Names
     "Jessica", "Ashley", "Sarah", "Amanda", "Jennifer", "Emily", "Samantha", 
@@ -25,7 +21,6 @@ FIRST_NAMES = [
     "Kevin", "Zachary", "Eric", "Brian", "Jaden", "Aiden", "Bradley"
 ]
 
-# Top 100 US Surnames (from ThoughtCo / US Census Data)
 LAST_NAMES = [
     "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", 
     "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", 
@@ -44,11 +39,7 @@ LAST_NAMES = [
     "Foster", "Jimenez"
 ]
 
-# Common US ZIP prefixes mapped to populated areas for convincing spatial data
-ZIP_PREFIXES = ["232", "201", "220", "100", "902", "303", "606", "752", "941"]
-
-# --- CONVINCING DATA GENERATION LOGIC ---
-
+# STREAMING_CHUNK:Defining Luhn algorithm validation...
 def generate_luhn_number(prefix: str, length: int) -> str:
     """
     Generates a structurally valid card number using the Luhn algorithm.
@@ -57,7 +48,6 @@ def generate_luhn_number(prefix: str, length: int) -> str:
     while len(digits) < (length - 1):
         digits.append(random.randint(0, 9))
     
-    # Calculate checksum digit (Luhn / Mod 10)
     checksum = 0
     reverse_digits = digits[::-1]
     for i, digit in enumerate(reverse_digits):
@@ -71,111 +61,111 @@ def generate_luhn_number(prefix: str, length: int) -> str:
     digits.append(check_digit)
     return "".join(map(str, digits))
 
-def generate_credit_card() -> tuple:
+# STREAMING_CHUNK:Defining random value generators...
+def generate_credit_card() -> str:
     """
-    Returns a tuple of (Brand, Card Number) with correct BIN prefixes and Luhn check.
+    Returns a structurally valid PAN using real BIN patterns.
     """
     brands = [
-        ("Visa", "4", 16),
-        ("Mastercard", "51", 16),
-        ("Mastercard", "55", 16),
-        ("Amex", "34", 15),
-        ("Amex", "37", 15),
-        ("Discover", "6011", 16)
+        ("4", 16),    # Visa
+        ("51", 16),   # Mastercard
+        ("37", 15),   # Amex
+        ("6011", 16)  # Discover
     ]
-    brand_name, prefix, length = random.choice(brands)
-    card_number = generate_luhn_number(prefix, length)
-    return brand_name, card_number
+    prefix, length = random.choice(brands)
+    return generate_luhn_number(prefix, length)
 
-def generate_dob(min_age=28, max_age=45) -> str:
+def generate_ssn() -> str:
     """
-    Generates a valid Date of Birth preserving month-specific day counts and leap years.
-    Targeted to birth years roughly matching the millennial range (1981 - 1998).
+    Generates a realistic SSN in the unassigned 900-series range 
+    to avoid accidental real-world matches while passing string validations.
     """
-    end_date = datetime.now() - timedelta(days=min_age * 365)
-    start_date = datetime.now() - timedelta(days=max_age * 365)
-    
-    random_days = random.randint(0, (end_date - start_date).days)
-    random_date = start_date + timedelta(days=random_days)
-    return random_date.strftime("%Y-%m-%d")
+    area = random.randint(900, 999)
+    group = random.randint(1, 99)
+    serial = random.randint(1, 9999)
+    return f"{area:03d}-{group:02d}-{serial:04d}"
 
-def generate_zip() -> str:
-    """Generates a realistic US ZIP code using common state prefixes."""
-    prefix = random.choice(ZIP_PREFIXES)
-    suffix = "".join(str(random.randint(0, 9)) for _ in range(5 - len(prefix)))
-    return f"{prefix}{suffix}"
+def generate_cvv() -> str:
+    """Generates a standard 3-digit Card Verification Value."""
+    return f"{random.randint(100, 999)}"
 
+def generate_exp() -> str:
+    """Generates a card expiration date formatted as MM/YY."""
+    month = random.randint(1, 12)
+    year = random.randint(26, 32)  # Generates futures up to 2032
+    return f"{month:02d}/{year:02d}"
+
+# STREAMING_CHUNK:Setting up size calculation utilities...
 def get_csv_row_bytes(row: list, encoding: str = "utf-8") -> int:
     """
-    Simulates writing a CSV row to memory to find its exact byte length on disk,
-    including appropriate system line terminators.
+    Calculates exact byte length on disk for any given list row.
     """
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\r\n")
     writer.writerow(row)
     return len(output.getvalue().encode(encoding))
 
-# --- MAIN ENGINE ---
-
-def generate_dataset(output_file="dlp_millennial_test_records.csv", num_records=None, max_size_mb=None):
+# STREAMING_CHUNK:Defining dataset generator logic...
+def generate_dataset(output_file="dlp_millennial_test_records.csv", num_records=None, max_size_mb=None, mode="pii"):
     """
-    Generates realistic synthetic records with optional size or record constraints.
-    Stops when the record count is met or when adding another record would exceed the max_size_mb.
+    Generates optimized PII or PCI records with hard size ceilings.
     """
-    # Calculate bytes limit if maximum size in MB is supplied
     bytes_limit = int(max_size_mb * 1024 * 1024) if max_size_mb is not None else None
     bytes_written = 0
     records_count = 0
 
-    header = ["First Name", "Last Name", "Date of Birth", "ZIP Code", "Card Brand", "Card Number"]
+    # Determine schema based on the selected mode
+    if mode == "pii":
+        # The absolute leanest combination to trigger a 50-state statutory PII breach
+        header = ["First Name", "Last Name", "SSN"]
+    else:
+        # The absolute leanest combination to trigger a 50-state statutory credit card breach
+        header = ["First Name", "Last Name", "Card Number", "CVV", "Exp"]
+
     header_bytes = get_csv_row_bytes(header)
 
-    # Pre-check size logic
     if bytes_limit is not None and header_bytes > bytes_limit:
         print(f"[-] Error: Target size of {max_size_mb} MB is too small even for the CSV header ({header_bytes} bytes).")
         return
 
-    print(f"[*] Starting dataset generation for '{output_file}'...")
+    print(f"[*] Starting dataset generation (Mode: {mode.upper()}) for '{output_file}'...")
     if bytes_limit:
         print(f"[*] Target cap: {max_size_mb} MB ({bytes_limit:,} bytes)")
     if num_records:
         print(f"[*] Target record count: {num_records:,}")
 
+    # STREAMING_CHUNK:Assembling rows based on mode...
     with open(output_file, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, lineterminator="\r\n")
         
-        # Write header
         writer.writerow(header)
         bytes_written += header_bytes
 
         while True:
-            # Check record limit constraint
             if num_records is not None and records_count >= num_records:
                 print(f"[+] Reached requested record limit of {num_records:,} rows.")
                 break
 
-            # Generate dummy values
+            # Populate only the bare essential fields per mode
             first = random.choice(FIRST_NAMES)
             last = random.choice(LAST_NAMES)
-            dob = generate_dob()
-            zip_code = generate_zip()
-            brand, cc_num = generate_credit_card()
+
+            if mode == "pii":
+                row = [first, last, generate_ssn()]
+            else:
+                row = [first, last, generate_credit_card(), generate_cvv(), generate_exp()]
             
-            row = [first, last, dob, zip_code, brand, cc_num]
             row_bytes = get_csv_row_bytes(row)
 
-            # Check size limit constraint
             if bytes_limit is not None and (bytes_written + row_bytes) > bytes_limit:
                 print(f"[+] Reached file size threshold. Next record would exceed {max_size_mb} MB limit.")
                 break
 
-            # Write row to output
             writer.writerow(row)
             bytes_written += row_bytes
             records_count += 1
 
-            # Provide UI feedback for large files
-            if records_count % 50000 == 0:
+            if records_count % 100000 == 0:
                 mb_curr = bytes_written / (1024 * 1024)
                 print(f"    -> Generated {records_count:,} records (~{mb_curr:.2f} MB written)")
 
@@ -183,10 +173,10 @@ def generate_dataset(output_file="dlp_millennial_test_records.csv", num_records=
     print(f"[+] Successfully wrote {records_count:,} records to '{output_file}'")
     print(f"[+] Final output size: {actual_file_size / (1024 * 1024):.4f} MB ({actual_file_size:,} bytes)")
 
-
+# STREAMING_CHUNK:Implementing command line interface...
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate robust structured synthetic datasets constrained by count or physical file size for DLP testing."
+        description="Generate highly optimized, structurally valid PII or PCI datasets constrained by size or count for DLP testing."
     )
     parser.add_argument(
         "-o", "--output", 
@@ -203,17 +193,24 @@ if __name__ == "__main__":
         "-s", "--max-size", 
         type=float, 
         default=None, 
+        dest="max_size",
         help="Maximum size constraint of the output file in MB (e.g. 18.7 for a raw email attachment limit)"
+    )
+    parser.add_argument(
+        "-m", "--mode",
+        choices=["pii", "pci"],
+        default="pii",
+        help="Generation mode: 'pii' (First, Last, SSN) or 'pci' (First, Last, Card Number, CVV, Exp). Default is 'pii'."
     )
 
     args = parser.parse_args()
 
-    # Default fallback behavior if no constraints are provided
-    if args.records is None and args.max-size is None:
+    if args.records is None and args.max_size is None:
         args.records = 10000
 
     generate_dataset(
         output_file=args.output,
         num_records=args.records,
-        max_size_mb=args.max_size
+        max_size_mb=args.max_size,
+        mode=args.mode
     )
