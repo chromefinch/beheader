@@ -18,6 +18,9 @@ Create:
 
 ![Create](images/CreateEmailMP4.png)
 
+Example pci/pii data eligible for breach
+![Create](images/dlpGEN.png)
+
 Inject:
 
 ![Upload](images/upload.png)
