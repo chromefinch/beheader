@@ -1,0 +1,2 @@
+alert tcp any any -> any any (msg:"MP4 Media Stream Started"; flow:established,to_server; content:"ftyp"; depth:16384; flowbits:set,mp4_stream; flowbits:noalert; sid:1000901; rev:1;)
+alert tcp any any -> any any (msg:"Large Base64 Data Block Embedded in MP4 Media Detected"; flowbits:isset,mp4_stream; pcre:"/(?:[A-Za-z0-9+\/]{60,100}[\r\n]{1,2}){3,}|[A-Za-z0-9+\/]{256,}/"; classtype:suspicious-filename-detect; sid:1000902; rev:13;)
