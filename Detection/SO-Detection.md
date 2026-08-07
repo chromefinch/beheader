@@ -22,31 +22,47 @@ Click the checkmark icon on the right to save the configuration. Open the **Opti
 Navigate to the **Detections** interface and load the custom YARA rule. Ensure the severity is declared as an integer (`severity = 3`) so the Elastic ingest pipeline correctly assigns a "High" severity label in the alerts:
 
 ```yara
-rule Polyglot_ICO_MP4_Base64 {
+rule High_Entropy_Base64_in_MP4_or_ICO {
     meta:
-        author = "Antigravity"
-        description = "Detects large blocks of Base64 encoded data embedded in MP4 or ICO/MP4 polyglot files."
-        date = "2026-07-28"
+        author = "John Porpora Augmented by Google's Antigravity"
+        description = "Detects high-entropy Base64 blocks in MP4 or ICO/MP4 polyglots, ignoring low-entropy media compression artifacts."
+        date = "2026-08-06"
         severity = 3
+        
     strings:
+        // Standard ICO magic bytes: 00 00 01 00
         $ico_magic = { 00 00 01 00 }
+        
+        // MP4 magic bytes
         $ftyp = "ftyp"
         
-        $b64_small_block = /[A-Za-z0-9+\/]{64}/
-        $b64_chunked = /([A-Za-z0-9+\/]{60,100}[\r\n]{1,2}){10}/
+        // Broad Base64 pattern (60-120 chars, optional padding)
+        // We let this match anything, including benign AAC artifacts.
+        $b64_block = /[A-Za-z0-9+\/]{60,120}={0,2}/
+        
+        // Standard padded blocks (kept for larger continuous chunks)
         $b64_padded_2 = /[A-Za-z0-9+\/]{100,}==/
         $b64_padded_1 = /[A-Za-z0-9+\/]{100,}[^=]=/
-        $b64_subtitle_chunk = /[a-zA-Z0-9+\/]{32}/
+
     condition:
+        // Anchor: It must start with the ICO bytes OR have the MP4 ftyp nearby.
         ($ico_magic at 0 or $ftyp in (0..16384)) 
         and 
         (
-            $b64_chunked or 
-            $b64_padded_1 or 
-            $b64_padded_2
+            // Iterate through every match. If ANY match has an entropy > 5.5, alert.
+            for any i in (1..#b64_block): (
+                math.entropy(@b64_block[i], !b64_block[i]) > 5.5
+            )
+            or
+            for any i in (1..#b64_padded_2): (
+                math.entropy(@b64_padded_2[i], !b64_padded_2[i]) > 5.5
+            )
+            or
+            for any i in (1..#b64_padded_1): (
+                math.entropy(@b64_padded_1[i], !b64_padded_1[i]) > 5.5
+            )
         )
 }
-
 ```
 
 *(Note: Wait ~15 minutes for the Detections sync to push the rule to Strelka).*
