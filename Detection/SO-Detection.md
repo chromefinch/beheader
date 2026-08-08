@@ -25,7 +25,7 @@ Navigate to the **Detections** interface and load the custom YARA rule. Ensure t
 rule High_Entropy_Base64_in_MP4_or_ICO {
     meta:
         author = "John Porpora Augmented by Google's Antigravity"
-        description = "Detects high-entropy Base64 blocks in MP4 or ICO/MP4 polyglots, ignoring low-entropy media compression artifacts."
+        description = "Detects high-entropy Base64 blocks in MP4 or ICO/MP4 polyglots. Capped iterations to prevent engine timeout on massive payloads."
         date = "2026-08-06"
         severity = 3
         
@@ -37,10 +37,9 @@ rule High_Entropy_Base64_in_MP4_or_ICO {
         $ftyp = "ftyp"
         
         // Broad Base64 pattern (60-120 chars, optional padding)
-        // We let this match anything, including benign AAC artifacts.
         $b64_block = /[A-Za-z0-9+\/]{60,120}={0,2}/
         
-        // Standard padded blocks (kept for larger continuous chunks)
+        // Standard padded blocks
         $b64_padded_2 = /[A-Za-z0-9+\/]{100,}==/
         $b64_padded_1 = /[A-Za-z0-9+\/]{100,}[^=]=/
 
@@ -49,17 +48,17 @@ rule High_Entropy_Base64_in_MP4_or_ICO {
         ($ico_magic at 0 or $ftyp in (0..16384)) 
         and 
         (
-            // Iterate through every match. If ANY match has an entropy > 5.5, alert.
+            // Cap the math calculations at 50 iterations to prevent CPU death.
             for any i in (1..#b64_block): (
-                math.entropy(@b64_block[i], !b64_block[i]) > 5.5
+                i <= 50 and math.entropy(@b64_block[i], !b64_block[i]) > 5.5
             )
             or
             for any i in (1..#b64_padded_2): (
-                math.entropy(@b64_padded_2[i], !b64_padded_2[i]) > 5.5
+                i <= 50 and math.entropy(@b64_padded_2[i], !b64_padded_2[i]) > 5.5
             )
             or
             for any i in (1..#b64_padded_1): (
-                math.entropy(@b64_padded_1[i], !b64_padded_1[i]) > 5.5
+                i <= 50 and math.entropy(@b64_padded_1[i], !b64_padded_1[i]) > 5.5
             )
         )
 }
