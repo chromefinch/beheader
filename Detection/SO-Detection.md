@@ -1,5 +1,3 @@
-Here is a complete, end-to-end write-up of the process. You can use this as the foundation for your methodology or execution section.
-
 1. **Enable Advanced Configuration:** Required to unhide backend policy trees.
 Log into the Security Onion Console (SOC) and navigate to **Administration -> Configuration**. Click the **Options** menu at the top of the page and toggle **Show advanced settings** to **ON**.
 
