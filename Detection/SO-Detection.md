@@ -22,11 +22,16 @@ Click the checkmark icon on the right to save the configuration. Open the **Opti
 Navigate to the **Detections** interface and load the custom YARA rule. Ensure the severity is declared as an integer (`severity = 3`) so the Elastic ingest pipeline correctly assigns a "High" severity label in the alerts:
 
 ```yara
+/*
+Security Onion should already import basic modules. 
+import "math"
+*/
 rule High_Entropy_Base64_in_MP4_or_ICO {
     meta:
         author = "John Porpora Augmented by Google's Antigravity"
         description = "Dynamically spot-checks Base64 matches across the entire file for high entropy, avoiding crashing on large files by capping the loop while still checking matches at the beginning, middle, and end."
-        
+        date = "2026-08-06"
+        severity = 3
     strings:
         // Match a block of 60 to 120 base64 characters
         $b64 = /[A-Za-z0-9+\/]{60,120}/
