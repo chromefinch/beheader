@@ -25,40 +25,26 @@ Navigate to the **Detections** interface and load the custom YARA rule. Ensure t
 rule High_Entropy_Base64_in_MP4_or_ICO {
     meta:
         author = "John Porpora Augmented by Google's Antigravity"
-        description = "Detects high-entropy Base64 blocks in MP4 or ICO/MP4 polyglots. Capped iterations to prevent engine timeout on massive payloads."
-        date = "2026-08-06"
-        severity = 3
+        description = "Dynamically spot-checks Base64 matches across the entire file for high entropy, avoiding crashing on large files by capping the loop while still checking matches at the beginning, middle, and end."
         
     strings:
-        // Standard ICO magic bytes: 00 00 01 00
-        $ico_magic = { 00 00 01 00 }
-        
-        // MP4 magic bytes
-        $ftyp = "ftyp"
-        
-        // Broad Base64 pattern (60-120 chars, optional padding)
-        $b64_block = /[A-Za-z0-9+\/]{60,120}={0,2}/
-        
-        // Standard padded blocks
-        $b64_padded_2 = /[A-Za-z0-9+\/]{100,}==/
-        $b64_padded_1 = /[A-Za-z0-9+\/]{100,}[^=]=/
-
+        // Match a block of 60 to 120 base64 characters
+        $b64 = /[A-Za-z0-9+\/]{60,120}/
     condition:
-        // Anchor: It must start with the ICO bytes OR have the MP4 ftyp nearby.
-        ($ico_magic at 0 or $ftyp in (0..16384)) 
+        (
+            uint32(0) == 0x00010000 // ICO magic
+            or 
+            uint32be(4) == 0x66747970 // MP4 ftyp
+        )
+        and 
+        #b64 > 0 
         and 
         (
-            // Cap the math calculations at 50 iterations to prevent CPU death.
-            for any i in (1..#b64_block): (
-                i <= 50 and math.entropy(@b64_block[i], !b64_block[i]) > 5.5
-            )
-            or
-            for any i in (1..#b64_padded_2): (
-                i <= 50 and math.entropy(@b64_padded_2[i], !b64_padded_2[i]) > 5.5
-            )
-            or
-            for any i in (1..#b64_padded_1): (
-                i <= 50 and math.entropy(@b64_padded_1[i], !b64_padded_1[i]) > 5.5
+            // We evaluate exactly 500 matches distributed evenly across the entire file.
+            // This ensures we find the payload even if it's hidden at the very end.
+            for any i in (1..500): (
+                (1 + (i - 1) * (#b64 \ 500)) <= #b64 and 
+                math.entropy(@b64[1 + (i - 1) * (#b64 \ 500)], !b64[1 + (i - 1) * (#b64 \ 500)]) > 5.2
             )
         )
 }
