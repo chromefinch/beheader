@@ -22,19 +22,14 @@ Click the checkmark icon on the right to save the configuration. Open the **Opti
 Navigate to the **Detections** interface and load the custom YARA rule. Ensure the severity is declared as an integer (`severity = 3`) so the Elastic ingest pipeline correctly assigns a "High" severity label in the alerts:
 
 ```yara
-/*
-Security Onion should already import basic modules. 
-import "math"
-*/
-rule High_Entropy_Base64_in_MP4_or_ICO {
+//Security Onion should already import basic modules. 
+//import "math"
+rule High_Density_Base64_Payload_in_MP4_ICO {
     meta:
         author = "John Porpora Augmented by Google's Antigravity"
-        description = "Dynamically spot-checks Base64 matches across the entire file for high entropy, avoiding crashing on large files by capping the loop while still checking matches at the beginning, middle, and end."
+        description = "Scans massive chunks of MP4/ICO files to find dense Base64 regions using math.count, avoiding YARA regex engine limits and warnings."
         date = "2026-08-06"
         severity = 3
-    strings:
-        // Match a block of 60 to 120 base64 characters
-        $b64 = /[A-Za-z0-9+\/]{60,120}/
     condition:
         (
             uint32(0) == 0x00010000 // ICO magic
@@ -42,14 +37,48 @@ rule High_Entropy_Base64_in_MP4_or_ICO {
             uint32be(4) == 0x66747970 // MP4 ftyp
         )
         and 
-        #b64 > 0 
-        and 
         (
-            // We evaluate exactly 500 matches distributed evenly across the entire file.
-            // This ensures we find the payload even if it's hidden at the very end.
-            for any i in (1..500): (
-                (1 + (i - 1) * (#b64 \ 500)) <= #b64 and 
-                math.entropy(@b64[1 + (i - 1) * (#b64 \ 500)], !b64[1 + (i - 1) * (#b64 \ 500)]) > 5.2
+            for any i in (0..10000): ( // Scan up to 2GB in 200KB chunks
+                (i * 200000 < filesize) and 
+                (
+                    // YARA lacks a native summation loop for integers, so we manually count and sum 
+                    // the occurrences of all 64 Base64 byte values within the current 200KB window.
+                    // 
+                    // Benign binary data is random across all 256 possible byte values. Therefore, 
+                    // the statistical probability of any byte naturally falling into the 64-character 
+                    // Base64 alphabet is exactly 25% (64/256). In a benign 200KB chunk, the sum of 
+                    // Base64 bytes will naturally hover around 50,000.
+                    // 
+                    // However, if a massive Base64 payload is injected, that chunk is no longer 
+                    // random binary—it becomes almost 100% Base64 characters. If our total sum 
+                    // exceeds 150,000 bytes (75% density), it guarantees we've hit an injected payload.
+                    (
+                    /* '+' and '/' */
+                    math.count(43, i*200000, 200000) + math.count(47, i*200000, 200000) +
+                    /* '0'-'9' */
+                    math.count(48, i*200000, 200000) + math.count(49, i*200000, 200000) + math.count(50, i*200000, 200000) + math.count(51, i*200000, 200000) +
+                    math.count(52, i*200000, 200000) + math.count(53, i*200000, 200000) + math.count(54, i*200000, 200000) + math.count(55, i*200000, 200000) +
+                    math.count(56, i*200000, 200000) + math.count(57, i*200000, 200000) +
+                    /* '=' */
+                    math.count(61, i*200000, 200000) +
+                    /* 'A'-'Z' */
+                    math.count(65, i*200000, 200000) + math.count(66, i*200000, 200000) + math.count(67, i*200000, 200000) + math.count(68, i*200000, 200000) +
+                    math.count(69, i*200000, 200000) + math.count(70, i*200000, 200000) + math.count(71, i*200000, 200000) + math.count(72, i*200000, 200000) +
+                    math.count(73, i*200000, 200000) + math.count(74, i*200000, 200000) + math.count(75, i*200000, 200000) + math.count(76, i*200000, 200000) +
+                    math.count(77, i*200000, 200000) + math.count(78, i*200000, 200000) + math.count(79, i*200000, 200000) + math.count(80, i*200000, 200000) +
+                    math.count(81, i*200000, 200000) + math.count(82, i*200000, 200000) + math.count(83, i*200000, 200000) + math.count(84, i*200000, 200000) +
+                    math.count(85, i*200000, 200000) + math.count(86, i*200000, 200000) + math.count(87, i*200000, 200000) + math.count(88, i*200000, 200000) +
+                    math.count(89, i*200000, 200000) + math.count(90, i*200000, 200000) +
+                    /* 'a'-'z' */
+                    math.count(97, i*200000, 200000) + math.count(98, i*200000, 200000) + math.count(99, i*200000, 200000) + math.count(100, i*200000, 200000) +
+                    math.count(101, i*200000, 200000) + math.count(102, i*200000, 200000) + math.count(103, i*200000, 200000) + math.count(104, i*200000, 200000) +
+                    math.count(105, i*200000, 200000) + math.count(106, i*200000, 200000) + math.count(107, i*200000, 200000) + math.count(108, i*200000, 200000) +
+                    math.count(109, i*200000, 200000) + math.count(110, i*200000, 200000) + math.count(111, i*200000, 200000) + math.count(112, i*200000, 200000) +
+                    math.count(113, i*200000, 200000) + math.count(114, i*200000, 200000) + math.count(115, i*200000, 200000) + math.count(116, i*200000, 200000) +
+                    math.count(117, i*200000, 200000) + math.count(118, i*200000, 200000) + math.count(119, i*200000, 200000) + math.count(120, i*200000, 200000) +
+                    math.count(121, i*200000, 200000) + math.count(122, i*200000, 200000)
+                    ) > 150000
+                )
             )
         )
 }
