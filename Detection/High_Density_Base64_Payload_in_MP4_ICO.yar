@@ -1,10 +1,10 @@
 import "math"
+
 rule High_Density_Base64_Payload_in_MP4_ICO {
     meta:
-        author = "John Porpora Augmented by Google's Antigravity"
+        author = "John Porpora (Augmented by Google Antigravity)"
         description = "Scans massive chunks of MP4/ICO files to find dense Base64 regions using math.count, avoiding YARA regex engine limits and warnings."
-        date = "2026-08-06"
-        severity = 3
+        
     condition:
         (
             uint32(0) == 0x00010000 // ICO magic
@@ -26,7 +26,7 @@ rule High_Density_Base64_Payload_in_MP4_ICO {
                     // 
                     // However, if a massive Base64 payload is injected, that chunk is no longer 
                     // random binary—it becomes almost 100% Base64 characters. If our total sum 
-                    // exceeds 150,000 bytes (75% density), it guarantees we've hit an injected payload.
+                    // exceeds 170,000 bytes (85% density), it guarantees we've hit an injected payload.
                     (
                     /* '+' and '/' */
                     math.count(43, i*200000, 200000) + math.count(47, i*200000, 200000) +
@@ -52,7 +52,7 @@ rule High_Density_Base64_Payload_in_MP4_ICO {
                     math.count(113, i*200000, 200000) + math.count(114, i*200000, 200000) + math.count(115, i*200000, 200000) + math.count(116, i*200000, 200000) +
                     math.count(117, i*200000, 200000) + math.count(118, i*200000, 200000) + math.count(119, i*200000, 200000) + math.count(120, i*200000, 200000) +
                     math.count(121, i*200000, 200000) + math.count(122, i*200000, 200000)
-                    ) > 150000
+                    ) > 170000
                 )
             )
         )
