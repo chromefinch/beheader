@@ -47,13 +47,13 @@
     Must match between inject and extract.
 
 .EXAMPLE
-    .\subtitle_injector.ps1 -Mode inject -Carrier movie.mp4 -Payload secret.zip
+    .\inject_extract.ps1 -Mode inject -Carrier movie.mp4 -Payload secret.zip
 .EXAMPLE
-    .\subtitle_injector.ps1 -Mode inject -Carrier movie.mp4 -Payload secret.zip -Key "mySecret"
+    .\inject_extract.ps1 -Mode inject -Carrier movie.mp4 -Payload secret.zip -Key "mySecret"
 .EXAMPLE
-    .\subtitle_injector.ps1 -Mode extract -Carrier injected_movie.mp4 -Key "mySecret"
+    .\inject_extract.ps1 -Mode extract -Carrier injected_movie.mp4 -Key "mySecret"
 .EXAMPLE
-    .\subtitle_injector.ps1 -Mode extract -Carrier part1.mp4,part2.mp4 -Key "mySecret"
+    .\inject_extract.ps1 -Mode extract -Carrier part1.mp4,part2.mp4 -Key "mySecret"
 #>
 
 [CmdletBinding()]
