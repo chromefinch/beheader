@@ -1,1 +1,0 @@
-alert ip any any -> any any (msg:"PII - Potential Social Security Number Detected"; pcre:"/\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b/"; classtype:policy-violation; sid:1000002; rev:2;)
